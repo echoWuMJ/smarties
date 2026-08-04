@@ -27,6 +27,15 @@ add_test(
           ${MPIEXEC_POSTFLAGS})
 
 if(BUILD_IBAMR_COUPLING)
+  add_executable(eel_smoke_protocol test_eel_smoke_protocol.cpp)
+  target_include_directories(eel_smoke_protocol PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d)
+  target_link_libraries(eel_smoke_protocol PRIVATE
+    ibamr_eel2d_adapter
+    ibamr_coupling_core
+    libsmarties)
+
   add_executable(eel_environment_smoke test_eel_environment_smoke.cpp)
   target_link_libraries(eel_environment_smoke PRIVATE
     ibamr_eel2d_environment
@@ -44,6 +53,10 @@ if(BUILD_IBAMR_COUPLING)
     "${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d/upstream/eel2d.vertex"
     "${EEL_ENVIRONMENT_RUN_DIR}/eel2d.vertex"
     COPYONLY)
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../configs/training/smoke.json"
+    "${EEL_ENVIRONMENT_RUN_DIR}/settings.json"
+    COPYONLY)
 
   add_test(
     NAME eel_environment_smoke
@@ -53,4 +66,23 @@ if(BUILD_IBAMR_COUPLING)
   set_tests_properties(eel_environment_smoke PROPERTIES
     WORKING_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}"
     TIMEOUT 180)
+
+  add_test(
+    NAME eel_smoke_protocol
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+            ${MPIEXEC_PREFLAGS} $<TARGET_FILE:eel_smoke_protocol>
+            --nMasters 1
+            --nThreads 1
+            --nEnvironments 1
+            --workerProcessesPerEnv 1
+            --learnersOnWorkers 0
+            --nTrainSteps 0
+            --restart none
+            --setupFolder .
+            --input-file input2d
+            --smoke-steps 1
+            ${MPIEXEC_POSTFLAGS})
+  set_tests_properties(eel_smoke_protocol PROPERTIES
+    WORKING_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}"
+    TIMEOUT 300)
 endif()

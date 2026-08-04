@@ -6,6 +6,8 @@
 #include <SAMRAI_config.h>
 #include <petscsys.h>
 
+#include <tbox/SAMRAI_MPI.h>
+
 #include <BergerRigoutsos.h>
 #include <CartesianGridGeometry.h>
 #include <LoadBalancer.h>
@@ -140,6 +142,10 @@ EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& i
   argv_[2] = nullptr;
 
   ibtk_init_.reset(new IBTKInit(argc_, argv_.data(), environment_comm_));
+  // IBAMR 0.18's bundled SAMRAI startup resets its communicator to
+  // SAMRAI_MPI::commWorld after IBTKInit first assigns the supplied subcomm.
+  // Restore the environment communicator before AppInitializer broadcasts.
+  SAMRAI::tbox::SAMRAI_MPI::setCommunicator(environment_comm_);
   shutdown_started_ = false;
 
   try

@@ -170,6 +170,7 @@ void Launcher::createGoRunDir(char* initDir, Uint folderID, MPI_Comm envAppCom)
       if( MPICommRank(envAppCom)<1 ) // app's root sets up dir
       {
         mkdir(newDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+        chdir(newDir);
         if(distrib.setupFolder not_eq "") //copy any file in the setup dir
         {
           if (copy_from_dir(("../"+distrib.setupFolder).c_str()) not_eq 0 )

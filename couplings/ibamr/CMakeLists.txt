@@ -1,9 +1,10 @@
 add_library(ibamr_coupling_core STATIC
   core/MpiSession.cpp
-  core/CommunicatorLayout.cpp)
+  core/CommunicatorLayout.cpp
+  core/CouplingDriver.cpp)
 target_include_directories(ibamr_coupling_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/core)
-target_link_libraries(ibamr_coupling_core PUBLIC MPI::MPI_CXX)
+target_link_libraries(ibamr_coupling_core PUBLIC MPI::MPI_CXX libsmarties)
 
 if(BUILD_IBAMR_COUPLING)
   find_package(IBAMR CONFIG REQUIRED
@@ -24,6 +25,19 @@ if(BUILD_IBAMR_COUPLING)
     ibamr_eel2d_support
     ibamr_coupling_core
     IBAMR::IBAMR2d)
+
+  add_library(ibamr_eel2d_adapter STATIC
+    cases/eel2d/EelSmartiesAdapter.cpp)
+  target_include_directories(ibamr_eel2d_adapter PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/cases/eel2d)
+  target_link_libraries(ibamr_eel2d_adapter PUBLIC
+    ibamr_eel2d_environment
+    libsmarties)
+
+  add_executable(ibamr_eel2d_smoke cases/eel2d/main.cpp)
+  target_link_libraries(ibamr_eel2d_smoke PRIVATE
+    ibamr_coupling_core
+    ibamr_eel2d_adapter)
 endif()
 
 if(BUILD_IBAMR_COUPLING_TESTS)
