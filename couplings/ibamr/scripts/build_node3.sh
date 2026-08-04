@@ -105,6 +105,8 @@ else
 fi
 IBAMR_ROOT=$patched_ibamr_root
 export IBAMR_ROOT
+SAMRAI_SOURCE_ROOT=/data2/mjwu/autoibamr-v0.18.0/tmp/unpack/IBSAMRAI2-2025.10.29
+export SAMRAI_SOURCE_ROOT
 
 cmake_configure=(
   cmake -S "$source_dir" -B "$build_dir"
