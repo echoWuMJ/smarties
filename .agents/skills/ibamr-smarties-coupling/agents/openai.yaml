@@ -1,0 +1,4 @@
+interface:
+  display_name: "IBAMR-Smarties Coupling"
+  short_description: "Fix coupling architecture and admit verified experience"
+  default_prompt: "Use $ibamr-smarties-coupling to design or review a stable IBAMR-Smarties coupling and admit only fully verified experience."

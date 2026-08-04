@@ -71,3 +71,9 @@ _deprecated*
 /source/Learners/Pytorch/old_stuff.py
 
 *.swp
+
+/.artifacts/
+/.codebase-memory/
+/.worktrees/
+/couplings/ibamr/build/
+/couplings/ibamr/runs/
