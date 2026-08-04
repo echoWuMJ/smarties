@@ -25,6 +25,7 @@ struct ExecutionInfo
   ExecutionInfo(const MPI_Comm& mpi_comm, int _argc, char ** _argv);
   ~ExecutionInfo();
 
+  const bool bOwnMPI; // whether MPI was initialized by this object
   const bool bOwnArgv; // whether argv needs to be deallocated
   int argc;
   char ** argv;

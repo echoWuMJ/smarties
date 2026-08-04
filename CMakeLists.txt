@@ -20,6 +20,8 @@ endif(NOT CMAKE_BUILD_TYPE)
 
 option(COMPILE_PY_SO "Compile Python bindings" ON)
 option(SINGLE_PRECISION "Use float32 for neural networks operations" ON)
+option(BUILD_IBAMR_COUPLING "Build the IBAMR coupling application" OFF)
+option(BUILD_IBAMR_COUPLING_TESTS "Build IBAMR coupling tests" OFF)
 
 # Smarties library
 
@@ -160,6 +162,14 @@ if (COMPILE_PY_SO)
     LIBRARY_OUTPUT_DIRECTORY "${lib_output}"
     )
 
+endif()
+
+if(BUILD_IBAMR_COUPLING_TESTS)
+  enable_testing()
+endif()
+
+if(BUILD_IBAMR_COUPLING OR BUILD_IBAMR_COUPLING_TESTS)
+  add_subdirectory(couplings/ibamr)
 endif()
 
 

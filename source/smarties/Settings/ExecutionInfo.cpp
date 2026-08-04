@@ -19,7 +19,7 @@ namespace smarties
 {
 
 ExecutionInfo::ExecutionInfo(const std::vector<std::string> & args) :
-bOwnArgv(true)
+bOwnMPI(true), bOwnArgv(true)
 {
   argc = (int) args.size();
   argv = new char * [argc+1];
@@ -37,7 +37,7 @@ bOwnArgv(true)
 }
 
 ExecutionInfo::ExecutionInfo(int _argc, char ** _argv) :
-  bOwnArgv(false), argc(_argc), argv(_argv)
+  bOwnMPI(true), bOwnArgv(false), argc(_argc), argv(_argv)
 {
   MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, & threadSafety);
   world_comm = MPI_COMM_WORLD;
@@ -47,7 +47,7 @@ ExecutionInfo::ExecutionInfo(int _argc, char ** _argv) :
 
 ExecutionInfo::ExecutionInfo(const MPI_Comm & initialiazed_mpi_comm,
                                    int _argc, char ** _argv) :
-  bOwnArgv(false), argc(_argc), argv(_argv)
+  bOwnMPI(false), bOwnArgv(false), argc(_argc), argv(_argv)
 {
   world_comm = initialiazed_mpi_comm;
   MPI_Query_thread(& threadSafety);
@@ -89,7 +89,7 @@ ExecutionInfo::~ExecutionInfo()
   freeMPIcom(workerless_masters_comm);
   freeMPIcom(learners_train_comm);
   freeMPIcom(environment_app_comm);
-  MPI_Finalize();
+  if (bOwnMPI) MPI_Finalize();
 }
 
 int ExecutionInfo::parse()
