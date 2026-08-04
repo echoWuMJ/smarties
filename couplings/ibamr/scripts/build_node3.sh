@@ -4,13 +4,14 @@ set -euo pipefail
 
 readonly DEFAULT_ENV_SCRIPT=/data2/mjwu/autoibamr-v0.18.0/configuration/enable.sh
 readonly EXPECTED_IBAMR_ROOT=/data2/mjwu/autoibamr-v0.18.0/packages/IBAMR-0.18.0
+readonly DEFAULT_IBAMR_OVERLAY=/data2/mjwu/local/coupling-deps/ibamr-0.18.0-samrai-subcomm-v1
 readonly GCC=/data2/mjwu/local/gcc-8.5.0/bin/gcc
 readonly GXX=/data2/mjwu/local/gcc-8.5.0/bin/g++
 
 usage()
 {
   cat <<'EOF'
-Usage: build_node3.sh [--source DIR] [--build DIR] [--dry-run]
+Usage: build_node3.sh [--source DIR] [--build DIR] [--ibamr-overlay DIR] [--dry-run]
 
 Configure and build the Smarties-IBAMR coupling on node3 with the verified
 IBAMR 0.18.0 and GCC 8.5.0 toolchain.
@@ -51,6 +52,7 @@ preflight()
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source_dir=$(cd "$script_dir/../../.." && pwd)
 build_dir=
+ibamr_overlay=$DEFAULT_IBAMR_OVERLAY
 dry_run=0
 
 while (($#)); do
@@ -63,6 +65,11 @@ while (($#)); do
     --build)
       (($# >= 2)) || die "missing value after --build"
       build_dir=$2
+      shift 2
+      ;;
+    --ibamr-overlay)
+      (($# >= 2)) || die "missing value after --ibamr-overlay"
+      ibamr_overlay=$2
       shift 2
       ;;
     --dry-run)
@@ -87,6 +94,18 @@ build_dir=${build_dir:-/data2/mjwu/local/coupling-build/$snapshot_name}
 
 preflight
 
+prepare_script="$script_dir/prepare_node3_ibamr.sh"
+patched_ibamr_root="$ibamr_overlay/packages/IBAMR-0.18.0"
+if ((dry_run)); then
+  "$prepare_script" --prefix "$ibamr_overlay" --dry-run
+else
+  "$prepare_script" --prefix "$ibamr_overlay"
+  [[ -f "$patched_ibamr_root/lib64/cmake/ibamr/IBAMRConfig.cmake" ]] ||
+    die "patched IBAMR overlay is incomplete: $patched_ibamr_root"
+fi
+IBAMR_ROOT=$patched_ibamr_root
+export IBAMR_ROOT
+
 cmake_configure=(
   cmake -S "$source_dir" -B "$build_dir"
   -DCMAKE_BUILD_TYPE=Release
@@ -102,6 +121,7 @@ cmake_build=(cmake --build "$build_dir" --parallel "${BUILD_JOBS:-8}")
 printf 'SOURCE=%s\n' "$source_dir"
 printf 'BUILD=%s\n' "$build_dir"
 printf 'SNAPSHOT_NAME=%s\n' "$snapshot_name"
+printf 'IBAMR_ROOT=%s\n' "$IBAMR_ROOT"
 printf 'CONFIGURE_COMMAND='
 printf '%q ' "${cmake_configure[@]}"
 printf '\nBUILD_COMMAND='

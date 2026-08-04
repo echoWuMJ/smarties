@@ -1,4 +1,4 @@
-# Smarties–IBAMR eel2d coupling
+# Smarties-IBAMR eel2d coupling
 
 This directory contains the first executable coupling framework for the IBAMR
 0.18.0 `eel2d` example and Smarties. The current executable is deliberately a
@@ -28,8 +28,25 @@ Upload or extract an immutable source snapshot, then run:
 
 The script sources
 `/data2/mjwu/autoibamr-v0.18.0/configuration/enable.sh` and rejects the build
-before CMake unless GCC/G++ 8.5.0, the matching Open MPI wrappers, and IBAMR
-0.18.0 are active. Python bindings remain disabled.
+before CMake unless GCC/G++ 8.5.0, the matching Open MPI wrappers, and the base
+IBAMR 0.18.0 environment are active. It then creates or reuses the isolated
+dependency overlay
+`/data2/mjwu/local/coupling-deps/ibamr-0.18.0-samrai-subcomm-v1`. The shared
+autoibamr installation is never modified. Python bindings remain disabled.
+
+The overlay is required because the IBSAMRAI2 source bundled on node3 contains
+operational `MPI_COMM_WORLD` calls in its box-clustering code. Those calls
+deadlock when an IBAMR environment uses a Smarties-created MPI
+subcommunicator. The tracked patch redirects them to the active SAMRAI or
+caller-supplied communicator. To prepare the overlay explicitly, run:
+
+```bash
+./couplings/ibamr/scripts/prepare_node3_ibamr.sh
+```
+
+The overlay is content-guarded by the SHA-256 of
+`patches/ibsamrai2-subcommunicator.patch`; a stale or partial overlay is not
+silently reused.
 
 ## One-command smoke run
 
@@ -64,6 +81,8 @@ specified and approved.
 
 ```bash
 bash couplings/ibamr/tests/test_node3_scripts.sh
+SAMRAI_SOURCE_ROOT=/data2/mjwu/autoibamr-v0.18.0/tmp/unpack/IBSAMRAI2-2025.10.29 \
+  bash couplings/ibamr/tests/test_samrai_subcommunicator_patch.sh
 ctest --test-dir /data2/mjwu/local/coupling-build/<snapshot> --output-on-failure
 ```
 

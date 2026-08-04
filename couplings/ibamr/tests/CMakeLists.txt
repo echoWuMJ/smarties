@@ -24,6 +24,12 @@ if(UNIX)
   add_test(
     NAME node3_scripts
     COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test_node3_scripts.sh")
+
+  if(DEFINED ENV{SAMRAI_SOURCE_ROOT})
+    add_test(
+      NAME samrai_subcommunicator_patch
+      COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test_samrai_subcommunicator_patch.sh")
+  endif()
 endif()
 
 add_test(

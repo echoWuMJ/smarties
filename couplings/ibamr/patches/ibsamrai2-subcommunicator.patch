@@ -1,0 +1,62 @@
+diff --git a/source/hierarchy/boxes/BinaryTree.C b/source/hierarchy/boxes/BinaryTree.C
+--- a/source/hierarchy/boxes/BinaryTree.C
++++ b/source/hierarchy/boxes/BinaryTree.C
+@@ -257 +257 @@
+-                  0, MPI_COMM_WORLD, request+j);
++                  0, tbox::SAMRAI_MPI::getCommunicator(), request+j);
+@@ -279 +279 @@
+-      MPI_Send(data, len, MPI_INT, anscestor, 0, MPI_COMM_WORLD);
++      MPI_Send(data, len, MPI_INT, anscestor, 0, tbox::SAMRAI_MPI::getCommunicator());
+@@ -336 +336 @@
+-     MPI_Recv(&value, 1, MPI_INT, anscestor, 0, MPI_COMM_WORLD, &status);
++     MPI_Recv(&value, 1, MPI_INT, anscestor, 0, tbox::SAMRAI_MPI::getCommunicator(), &status);
+@@ -354 +354 @@
+-                   0, MPI_COMM_WORLD, request+j);
++                   0, tbox::SAMRAI_MPI::getCommunicator(), request+j);
+@@ -389 +389 @@
+-   MPI_Group old_group, world_group;
++   MPI_Group old_group, samrai_group;
+@@ -392 +392 @@
+-   MPI_Comm_group(MPI_COMM_WORLD, &world_group);
++   MPI_Comm_group(tbox::SAMRAI_MPI::getCommunicator(), &samrai_group);
+@@ -396 +396 @@
+-    * to their respective ranks in the world group.
++    * to their respective ranks in SAMRAI's active communicator.
+@@ -398 +398 @@
+-   tbox::Array<int> world_ranks_array(old_np);
++   tbox::Array<int> samrai_ranks_array(old_np);
+@@ -400 +400 @@
+-   int *world_ranks = world_ranks_array.getPointer();
++   int *samrai_ranks = samrai_ranks_array.getPointer();
+@@ -406 +406 @@
+-                             world_group, world_ranks);
++                             samrai_group, samrai_ranks);
+@@ -415 +415 @@
+-      int world_id = world_ranks[i];
++      int samrai_id = samrai_ranks[i];
+@@ -417 +417 @@
+-      if (participates(world_id, box)) {
++      if (participates(samrai_id, box)) {
+@@ -428,2 +428,2 @@
+-         world_id = world_ranks[m];
+-         if (world_id == root) {
++         samrai_id = samrai_ranks[m];
++         if (samrai_id == root) {
+diff --git a/source/hierarchy/boxes/BoxComm.C b/source/hierarchy/boxes/BoxComm.C
+--- a/source/hierarchy/boxes/BoxComm.C
++++ b/source/hierarchy/boxes/BoxComm.C
+@@ -187 +187 @@
+-    0, MPI_COMM_WORLD, request+j);
++    0, tbox::SAMRAI_MPI::getCommunicator(), request+j);
+diff --git a/source/mesh/clustering/AsyncBergerRigoutsosNode.C b/source/mesh/clustering/AsyncBergerRigoutsosNode.C
+--- a/source/mesh/clustering/AsyncBergerRigoutsosNode.C
++++ b/source/mesh/clustering/AsyncBergerRigoutsosNode.C
+@@ -908 +908 @@
+-   MPI_Attr_get( MPI_COMM_WORLD,
++   MPI_Attr_get( mpi_communicator,
+diff --git a/source/toolbox/parallel/AsyncCommGroup.C b/source/toolbox/parallel/AsyncCommGroup.C
+--- a/source/toolbox/parallel/AsyncCommGroup.C
++++ b/source/toolbox/parallel/AsyncCommGroup.C
+@@ -75 +75 @@
+-   d_mpi_communicator(MPI_COMM_WORLD),
++   d_mpi_communicator(SAMRAI_MPI::getCommunicator()),

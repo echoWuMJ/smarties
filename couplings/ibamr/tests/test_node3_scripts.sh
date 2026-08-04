@@ -4,6 +4,7 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 build_script="$repo_root/couplings/ibamr/scripts/build_node3.sh"
+prepare_script="$repo_root/couplings/ibamr/scripts/prepare_node3_ibamr.sh"
 run_script="$repo_root/couplings/ibamr/scripts/run_node3.sh"
 fixture_root=$(mktemp -d)
 trap 'rm -rf "$fixture_root"' EXIT
@@ -78,6 +79,18 @@ capture_status()
   set -e
   return "$status"
 }
+
+mkdir -p "$fixture_root/base/tmp/unpack/IBSAMRAI2-2025.10.29" \
+  "$fixture_root/base/tmp/unpack/IBAMR-0.18.0"
+printf '#!/usr/bin/env bash\n' > \
+  "$fixture_root/base/tmp/unpack/IBSAMRAI2-2025.10.29/configure"
+printf 'cmake_minimum_required(VERSION 3.5)\n' > \
+  "$fixture_root/base/tmp/unpack/IBAMR-0.18.0/CMakeLists.txt"
+
+output=$(SMARTIES_IBAMR_BASE_ROOT="$fixture_root/base" \
+  bash "$prepare_script" --prefix "$fixture_root/overlay" --dry-run)
+assert_contains "$output" 'OVERLAY_STATUS=would-build'
+assert_contains "$output" "IBAMR_ROOT=$fixture_root/overlay/packages/IBAMR-0.18.0"
 
 output=$(bash "$run_script" smoke --dry-run --envs 1 --ranks-per-env 1 \
   --fidelity coarse --training couplings/ibamr/configs/training/smoke.json \
