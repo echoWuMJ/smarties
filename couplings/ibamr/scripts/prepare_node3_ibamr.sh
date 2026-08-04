@@ -100,34 +100,42 @@ if ((dry_run)); then
   exit 0
 fi
 
-[[ ! -e "$prefix" ]] ||
-  die "incomplete or stale overlay exists; choose a new --prefix: $prefix"
-
 mkdir -p "$prefix/src" "$samrai_build" "$samrai_install" \
   "$ibamr_build" "$ibamr_install"
-cp -a "$samrai_base_source" "$samrai_source"
-patch --dry-run -d "$samrai_source" -p1 -i "$patch_file"
-patch -d "$samrai_source" -p1 -i "$patch_file"
+if [[ ! -d "$samrai_source" ]]; then
+  cp -a "$samrai_base_source" "$samrai_source"
+fi
+if patch --dry-run -d "$samrai_source" -p1 -i "$patch_file" >/dev/null 2>&1; then
+  patch -d "$samrai_source" -p1 -i "$patch_file"
+elif patch --dry-run -R -d "$samrai_source" -p1 -i "$patch_file" >/dev/null 2>&1; then
+  printf 'SAMRAI_PATCH_STATUS=already-applied\n'
+else
+  die "SAMRAI source is neither pristine nor patched as expected: $samrai_source"
+fi
 
 export CC=$MPICC
 export CXX=$MPICXX
 export F77=$MPIF77
 
-(
-  cd "$samrai_build"
-  "$samrai_source/configure" \
-    --with-F77="$MPIF77" \
-    --with-hdf5="$base_root/packages/hdf5-1.12.2" \
-    --without-petsc --without-hypre --without-blaslapack \
-    --without-cubes --without-eleven --without-kinsol --without-sundials \
-    --without-x --enable-dcomplex --enable-implicit-template-instantiation \
-    --disable-deprecated \
-    CFLAGS='-fPIC -O2' CXXFLAGS='-fPIC -O2' FFLAGS='-fPIC -O2' \
-    --with-silo="$base_root/packages/silo-4.11-bsd" \
-    --prefix="$samrai_install"
-  make -j"${BUILD_JOBS:-8}"
-  make install
-)
+if [[ ! -f "$samrai_install/lib/libSAMRAI.a" ]]; then
+  (
+    cd "$samrai_build"
+    "$samrai_source/configure" \
+      --with-F77="$MPIF77" \
+      --with-hdf5="$base_root/packages/hdf5-1.12.2" \
+      --without-petsc --without-hypre --without-blaslapack \
+      --without-cubes --without-eleven --without-kinsol --without-sundials \
+      --without-x --enable-dcomplex --enable-implicit-template-instantiation \
+      --disable-deprecated \
+      CFLAGS='-fPIC -O2' CXXFLAGS='-fPIC -O2' FFLAGS='-fPIC -O2' \
+      --with-silo="$base_root/packages/silo-4.11-bsd" \
+      --prefix="$samrai_install"
+    make -j"${BUILD_JOBS:-8}"
+    make install
+  )
+else
+  printf 'SAMRAI_BUILD_STATUS=reused\n'
+fi
 
 cmake -S "$ibamr_base_source" -B "$ibamr_build" \
   -DCMAKE_BUILD_TYPE=Release \
@@ -139,6 +147,7 @@ cmake -S "$ibamr_base_source" -B "$ibamr_build" \
   -DIBAMR_FORCE_BUNDLED_Eigen3=ON \
   -DIBAMR_FORCE_BUNDLED_muParser=ON \
   -DHDF5_ROOT="$base_root/packages/hdf5-1.12.2" \
+  -DHYPRE_ROOT="$base_root/packages/petsc-3.23.3" \
   -DPETSC_ROOT="$base_root/packages/petsc-3.23.3" \
   -DLIBMESH_ROOT="$base_root/packages/libmesh-1.7.8" \
   -DLIBMESH_METHOD=OPT \
