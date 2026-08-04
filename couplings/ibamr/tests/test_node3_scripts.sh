@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+build_script="$repo_root/couplings/ibamr/scripts/build_node3.sh"
+run_script="$repo_root/couplings/ibamr/scripts/run_node3.sh"
+fixture_root=$(mktemp -d)
+trap 'rm -rf "$fixture_root"' EXIT
+
+mkdir -p "$fixture_root/bin"
+
+cat >"$fixture_root/bin/gcc" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "${FIXTURE_GCC_VERSION:-8.5.0}"
+EOF
+cat >"$fixture_root/bin/g++" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "${FIXTURE_GXX_VERSION:-8.5.0}"
+EOF
+cat >"$fixture_root/bin/mpicc" <<'EOF'
+#!/usr/bin/env bash
+[[ "${1:-}" == "--showme:command" ]]
+printf '%s\n' /data2/mjwu/local/gcc-8.5.0/bin/gcc
+EOF
+cat >"$fixture_root/bin/mpicxx" <<'EOF'
+#!/usr/bin/env bash
+[[ "${1:-}" == "--showme:command" ]]
+printf '%s\n' /data2/mjwu/local/gcc-8.5.0/bin/g++
+EOF
+cat >"$fixture_root/bin/cmake" <<'EOF'
+#!/usr/bin/env bash
+for argument in "$@"; do
+  case $argument in
+    -DOUTPUT_FILE=*)
+      output=${argument#-DOUTPUT_FILE=}
+      printf 'rendered fixture input\n' >"$output"
+      ;;
+  esac
+done
+EOF
+cat >"$fixture_root/bin/mpiexec" <<'EOF'
+#!/usr/bin/env bash
+[[ "${1:-}" == "-n" ]]
+shift 2
+"$@"
+EOF
+chmod +x "$fixture_root/bin/gcc" "$fixture_root/bin/g++" \
+  "$fixture_root/bin/mpicc" "$fixture_root/bin/mpicxx" \
+  "$fixture_root/bin/cmake" "$fixture_root/bin/mpiexec"
+
+cat >"$fixture_root/enable.sh" <<EOF
+export PATH="$fixture_root/bin:\$PATH"
+export IBAMR_ROOT=/data2/mjwu/autoibamr-v0.18.0/packages/IBAMR-0.18.0
+EOF
+export SMARTIES_IBAMR_ENV_SCRIPT="$fixture_root/enable.sh"
+
+fail()
+{
+  printf 'FAIL: %s\n' "$*" >&2
+  exit 1
+}
+
+assert_contains()
+{
+  local output=$1 expected=$2
+  [[ "$output" == *"$expected"* ]] ||
+    fail "expected output to contain '$expected', got: $output"
+}
+
+capture_status()
+{
+  local output_file=$1
+  shift
+  set +e
+  "$@" >"$output_file" 2>&1
+  local status=$?
+  set -e
+  return "$status"
+}
+
+output=$(bash "$run_script" smoke --dry-run --envs 1 --ranks-per-env 1 \
+  --fidelity coarse --training couplings/ibamr/configs/training/smoke.json \
+  --smoke-steps 1)
+assert_contains "$output" "ENVIRONMENT_RANKS=1"
+assert_contains "$output" "MPI_RANKS=2"
+assert_contains "$output" "--learnersOnWorkers 0"
+
+output=$(bash "$run_script" smoke --dry-run --envs 2 --ranks-per-env 2 \
+  --fidelity medium --training couplings/ibamr/configs/training/smoke.json \
+  --smoke-steps 1)
+assert_contains "$output" "ENVIRONMENT_RANKS=4"
+assert_contains "$output" "MPI_RANKS=5"
+
+fixture_source="$fixture_root/smarties-fixture-0123456789ab"
+fixture_build="$fixture_root/build-real"
+mkdir -p "$fixture_source/couplings/ibamr/configs/fidelity" \
+  "$fixture_source/couplings/ibamr/configs/training" \
+  "$fixture_source/couplings/ibamr/scripts" \
+  "$fixture_source/couplings/ibamr/cases/eel2d/upstream" \
+  "$fixture_build/couplings/ibamr"
+printf 'cmake_minimum_required(VERSION 3.5)\n' >"$fixture_source/CMakeLists.txt"
+printf 'fixture fidelity\n' >"$fixture_source/couplings/ibamr/configs/fidelity/coarse.conf"
+printf '{}\n' >"$fixture_source/couplings/ibamr/configs/training/smoke.json"
+printf 'fixture renderer\n' >"$fixture_source/couplings/ibamr/scripts/render_input.cmake"
+printf 'fixture vertex\n' >"$fixture_source/couplings/ibamr/cases/eel2d/upstream/eel2d.vertex"
+cat >"$fixture_build/couplings/ibamr/ibamr_eel2d_smoke" <<'EOF'
+#!/usr/bin/env bash
+printf 'fixture coupling completed\n'
+EOF
+chmod +x "$fixture_build/couplings/ibamr/ibamr_eel2d_smoke"
+
+output=$(bash "$run_script" smoke --source "$fixture_source" \
+  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity coarse \
+  --training couplings/ibamr/configs/training/smoke.json --smoke-steps 1)
+assert_contains "$output" "fixture coupling completed"
+real_run_dir=$(printf '%s\n' "$output" | sed -n 's/^RUN_DIRECTORY=//p')
+[[ -f "$real_run_dir/manifest.txt" ]] || fail "real-path manifest was not written"
+[[ "$(<"$real_run_dir/exit_code.txt")" == 0 ]] ||
+  fail "real-path exit code was not preserved"
+
+if capture_status "$fixture_root/envs-zero.log" bash "$run_script" smoke \
+  --dry-run --envs 0 --ranks-per-env 1; then
+  fail "--envs 0 was accepted"
+fi
+assert_contains "$(<"$fixture_root/envs-zero.log")" "--envs must be a positive integer"
+
+if capture_status "$fixture_root/ranks-zero.log" bash "$run_script" smoke \
+  --dry-run --envs 1 --ranks-per-env 0; then
+  fail "--ranks-per-env 0 was accepted"
+fi
+assert_contains "$(<"$fixture_root/ranks-zero.log")" \
+  "--ranks-per-env must be a positive integer"
+
+set +e
+bash "$run_script" train --dry-run >"$fixture_root/train.log" 2>&1
+status=$?
+set -e
+[[ $status -eq 64 ]] || fail "train returned $status instead of 64"
+assert_contains "$(<"$fixture_root/train.log")" "train mode is not supported"
+
+FIXTURE_GCC_VERSION=8.4.0
+export FIXTURE_GCC_VERSION
+if capture_status "$fixture_root/gcc.log" bash "$build_script" --dry-run \
+  --source "$repo_root" --build "$fixture_root/build"; then
+  fail "GCC 8.4.0 fixture passed preflight"
+fi
+assert_contains "$(<"$fixture_root/gcc.log")" "requires gcc 8.5.0"
+[[ ! -e "$fixture_root/build/CMakeCache.txt" ]] ||
+  fail "build preflight invoked CMake after compiler rejection"
+
+printf 'node3 script behavior tests passed\n'

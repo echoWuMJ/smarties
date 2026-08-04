@@ -20,6 +20,12 @@ add_test(NAME owned_engine_shutdown COMMAND owned_engine_shutdown)
 
 add_test(NAME mpi_session COMMAND mpi_session)
 
+if(UNIX)
+  add_test(
+    NAME node3_scripts
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test_node3_scripts.sh")
+endif()
+
 add_test(
   NAME communicator_layout
   COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
