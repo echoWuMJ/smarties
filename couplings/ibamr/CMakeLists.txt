@@ -15,6 +15,15 @@ if(BUILD_IBAMR_COUPLING)
   target_include_directories(ibamr_eel2d_support PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/cases/eel2d/upstream)
   target_link_libraries(ibamr_eel2d_support PUBLIC IBAMR::IBAMR2d)
+
+  add_library(ibamr_eel2d_environment STATIC
+    cases/eel2d/EelEnvironment.cpp)
+  target_include_directories(ibamr_eel2d_environment PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/cases/eel2d)
+  target_link_libraries(ibamr_eel2d_environment PUBLIC
+    ibamr_eel2d_support
+    ibamr_coupling_core
+    IBAMR::IBAMR2d)
 endif()
 
 if(BUILD_IBAMR_COUPLING_TESTS)

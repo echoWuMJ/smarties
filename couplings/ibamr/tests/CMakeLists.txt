@@ -25,3 +25,32 @@ add_test(
   COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
           ${MPIEXEC_PREFLAGS} $<TARGET_FILE:communicator_layout>
           ${MPIEXEC_POSTFLAGS})
+
+if(BUILD_IBAMR_COUPLING)
+  add_executable(eel_environment_smoke test_eel_environment_smoke.cpp)
+  target_link_libraries(eel_environment_smoke PRIVATE
+    ibamr_eel2d_environment
+    ibamr_coupling_core)
+
+  set(EEL_ENVIRONMENT_RUN_DIR "${CMAKE_CURRENT_BINARY_DIR}/eel-environment-smoke")
+  file(MAKE_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}")
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIDELITY_FILE=${CMAKE_CURRENT_SOURCE_DIR}/../configs/fidelity/coarse.conf"
+      "-DOUTPUT_FILE=${EEL_ENVIRONMENT_RUN_DIR}/input2d"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/render_input.cmake"
+    COMMAND_ERROR_IS_FATAL ANY)
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d/upstream/eel2d.vertex"
+    "${EEL_ENVIRONMENT_RUN_DIR}/eel2d.vertex"
+    COPYONLY)
+
+  add_test(
+    NAME eel_environment_smoke
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
+            ${MPIEXEC_PREFLAGS} $<TARGET_FILE:eel_environment_smoke>
+            input2d ${MPIEXEC_POSTFLAGS})
+  set_tests_properties(eel_environment_smoke PROPERTIES
+    WORKING_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}"
+    TIMEOUT 180)
+endif()
