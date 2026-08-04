@@ -46,6 +46,21 @@ if ($listing -notcontains 'SOURCE_MANIFEST.sha256') {
     throw 'source manifest missing'
 }
 
+$gitTar = 'C:\Program Files\Git\usr\bin\tar.exe'
+Push-Location $archive.DirectoryName
+foreach ($script in @(
+    './couplings/ibamr/scripts/build_node3.sh',
+    './couplings/ibamr/scripts/run_node3.sh',
+    './couplings/ibamr/tests/test_node3_scripts.sh'
+)) {
+    $modeLine = (& $gitTar -tvzf $archive.Name $script) -join "`n"
+    if ($LASTEXITCODE -ne 0 -or -not $modeLine.StartsWith('-rwxr-xr-x')) {
+        Pop-Location
+        throw "executable mode missing from archive entry: $script ($modeLine)"
+    }
+}
+Pop-Location
+
 foreach ($forbidden in @('.git/', '.artifacts/', '.codebase-memory/', '.worktrees/', 'couplings/ibamr/build/', 'couplings/ibamr/runs/')) {
     if ($listing | Where-Object { $_.StartsWith($forbidden) }) {
         throw "forbidden path packaged: $forbidden"

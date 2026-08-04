@@ -36,8 +36,12 @@ Get-ChildItem $stage -Recurse -File |
     Set-Content -Encoding ascii $manifest
 
 $archive = Join-Path $OutputDirectory "$name.tar.gz"
-& tar -czf $archive -C $stage .
-if ($LASTEXITCODE -ne 0) {
+$gitTar = 'C:\Program Files\Git\usr\bin\tar.exe'
+Push-Location $OutputDirectory
+& $gitTar -czf "$name.tar.gz" -C $name .
+$tarExitCode = $LASTEXITCODE
+Pop-Location
+if ($tarExitCode -ne 0) {
     throw 'tar failed'
 }
 
