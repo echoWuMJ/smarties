@@ -73,6 +73,12 @@ input, copied settings, stdout log, exit code, and a revision/hash manifest.
 Use `--dry-run` to validate the environment and print the command without
 creating a run directory.
 
+The build writes `couplings/ibamr/build_manifest.txt` inside the selected build
+directory. A real run verifies its source revision, source path, and executable
+SHA-256. If the executable is missing, stale, or changed, `run_node3.sh`
+automatically invokes the matching snapshot's `build_node3.sh` before MPI is
+started. The run manifest records both source and verified build identities.
+
 `train` intentionally exits with status 64. It will remain disabled until the
 fish control variable, state vector, reward, time horizon, and safety limits are
 specified and approved.

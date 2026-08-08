@@ -76,6 +76,12 @@ revision_of()
   printf '%s\n' "${revision:-unknown}"
 }
 
+manifest_value()
+{
+  local key=$1 manifest=$2
+  sed -n "s/^${key}=//p" "$manifest" | tail -n 1
+}
+
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source_dir=$(cd "$script_dir/../../.." && pwd)
 mode=${1:-}
@@ -162,11 +168,54 @@ timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 run_id="eel2d-${timestamp}-${revision}-$$"
 run_dir="$source_dir/couplings/ibamr/runs/$run_id"
 executable="$build_dir/couplings/ibamr/ibamr_eel2d_smoke"
+build_manifest="$build_dir/couplings/ibamr/build_manifest.txt"
+build_script="$source_dir/couplings/ibamr/scripts/build_node3.sh"
 fidelity_dir="$source_dir/couplings/ibamr/configs/fidelity"
 render_script="$source_dir/couplings/ibamr/scripts/render_input.cmake"
 vertex_file="$source_dir/couplings/ibamr/cases/eel2d/upstream/eel2d.vertex"
 
 preflight
+
+build_is_current()
+{
+  [[ -x "$executable" && -f "$build_manifest" ]] || return 1
+  local recorded_revision recorded_source recorded_sha actual_sha
+  recorded_revision=$(manifest_value revision "$build_manifest")
+  recorded_source=$(manifest_value source "$build_manifest")
+  recorded_sha=$(manifest_value executable_sha256 "$build_manifest")
+  [[ "$recorded_revision" == "$revision" ]] || return 1
+  [[ "$recorded_source" == "$source_dir" ]] || return 1
+  [[ $recorded_sha =~ ^[0-9a-f]{64}$ ]] || return 1
+  actual_sha=$(sha256sum "$executable" | awk '{print $1}')
+  [[ "$actual_sha" == "$recorded_sha" ]]
+}
+
+if ((dry_run)); then
+  if build_is_current; then
+    build_status=current
+  else
+    build_status=would-build
+  fi
+else
+  if ! build_is_current; then
+    [[ -x "$build_script" ]] || die "build script not executable: $build_script"
+    printf 'BUILD_STATUS=building\n'
+    "$build_script" --source "$source_dir" --build "$build_dir"
+  fi
+  build_is_current ||
+    die "build identity does not match source revision $revision: $build_manifest"
+  build_status=current
+fi
+
+if [[ $build_status == current ]]; then
+  build_revision=$(manifest_value revision "$build_manifest")
+  executable_sha256=$(manifest_value executable_sha256 "$build_manifest")
+  build_manifest_sha256=$(sha256sum "$build_manifest" | awk '{print $1}')
+else
+  build_revision=unbuilt
+  executable_sha256=unbuilt
+  build_manifest_sha256=unbuilt
+fi
 
 launch_args=(
   --nMasters "$learner_ranks"
@@ -197,6 +246,8 @@ printf 'LEARNER_RANKS=%s\n' "$learner_ranks"
 printf 'ENVIRONMENT_RANKS=%s\n' "$environment_ranks"
 printf 'MPI_RANKS=%s\n' "$mpi_ranks"
 printf 'FIDELITY=%s\n' "$fidelity"
+printf 'BUILD_STATUS=%s\n' "$build_status"
+printf 'BUILD_REVISION=%s\n' "$build_revision"
 printf 'COMMAND='
 printf '%q ' "${command[@]}"
 printf '\n'
@@ -205,7 +256,6 @@ if ((dry_run)); then
   exit 0
 fi
 
-[[ -x "$executable" ]] || die "coupling executable not found: $executable"
 [[ -f "$render_script" ]] || die "input renderer not found: $render_script"
 [[ -f "$vertex_file" ]] || die "eel vertex file not found: $vertex_file"
 mkdir -p "$run_dir"
@@ -239,6 +289,9 @@ manifest="$run_dir/manifest.txt"
   printf 'revision=%s\n' "$revision"
   printf 'source=%s\n' "$source_dir"
   printf 'build=%s\n' "$build_dir"
+  printf 'build_revision=%s\n' "$build_revision"
+  printf 'build_manifest_sha256=%s\n' "$build_manifest_sha256"
+  printf 'executable_sha256=%s\n' "$executable_sha256"
   printf 'learner_ranks=%s\n' "$learner_ranks"
   printf 'environment_count=%s\n' "$envs"
   printf 'ranks_per_environment=%s\n' "$ranks_per_env"

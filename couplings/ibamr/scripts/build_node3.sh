@@ -24,6 +24,17 @@ die()
   exit 65
 }
 
+revision_of()
+{
+  local source_dir=$1 revision
+  if revision=$(git -C "$source_dir" rev-parse --short=12 HEAD 2>/dev/null); then
+    printf '%s\n' "$revision"
+    return
+  fi
+  revision=$(basename "$source_dir" | sed -n 's/.*-\([0-9a-f]\{12\}\).*/\1/p')
+  printf '%s\n' "${revision:-unknown}"
+}
+
 preflight()
 {
   local env_script=${SMARTIES_IBAMR_ENV_SCRIPT:-$DEFAULT_ENV_SCRIPT}
@@ -137,3 +148,20 @@ fi
 mkdir -p "$build_dir"
 "${cmake_configure[@]}"
 "${cmake_build[@]}"
+
+revision=$(revision_of "$source_dir")
+executable="$build_dir/couplings/ibamr/ibamr_eel2d_smoke"
+build_manifest="$build_dir/couplings/ibamr/build_manifest.txt"
+[[ $revision != unknown ]] || die "cannot determine source revision: $source_dir"
+[[ -x "$executable" ]] || die "build did not produce executable: $executable"
+executable_sha256=$(sha256sum "$executable" | awk '{print $1}')
+manifest_tmp="$build_manifest.tmp.$$"
+{
+  printf 'revision=%s\n' "$revision"
+  printf 'source=%s\n' "$source_dir"
+  printf 'executable_sha256=%s\n' "$executable_sha256"
+} >"$manifest_tmp"
+mv "$manifest_tmp" "$build_manifest"
+printf 'BUILD_MANIFEST=%s\n' "$build_manifest"
+printf 'BUILD_REVISION=%s\n' "$revision"
+printf 'EXECUTABLE_SHA256=%s\n' "$executable_sha256"

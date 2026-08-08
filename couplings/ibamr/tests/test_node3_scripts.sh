@@ -122,6 +122,41 @@ cat >"$fixture_build/couplings/ibamr/ibamr_eel2d_smoke" <<'EOF'
 printf 'fixture coupling completed\n'
 EOF
 chmod +x "$fixture_build/couplings/ibamr/ibamr_eel2d_smoke"
+fixture_executable_sha=$(sha256sum \
+  "$fixture_build/couplings/ibamr/ibamr_eel2d_smoke" | awk '{print $1}')
+cat >"$fixture_build/couplings/ibamr/build_manifest.txt" <<EOF
+revision=0123456789ab
+source=$fixture_source
+executable_sha256=$fixture_executable_sha
+EOF
+cat >"$fixture_source/couplings/ibamr/scripts/build_node3.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+source_dir=
+build_dir=
+while (($#)); do
+  case $1 in
+    --source) source_dir=$2; shift 2 ;;
+    --build) build_dir=$2; shift 2 ;;
+    *) exit 64 ;;
+  esac
+done
+executable="$build_dir/couplings/ibamr/ibamr_eel2d_smoke"
+mkdir -p "$(dirname "$executable")"
+cat >"$executable" <<'PROGRAM'
+#!/usr/bin/env bash
+printf 'fixture coupling rebuilt and completed\n'
+PROGRAM
+chmod +x "$executable"
+executable_sha=$(sha256sum "$executable" | awk '{print $1}')
+cat >"$build_dir/couplings/ibamr/build_manifest.txt" <<MANIFEST
+revision=0123456789ab
+source=$source_dir
+executable_sha256=$executable_sha
+MANIFEST
+printf 'rebuilt\n' >"$build_dir/rebuild-called.txt"
+EOF
+chmod +x "$fixture_source/couplings/ibamr/scripts/build_node3.sh"
 
 output=$(bash "$run_script" smoke --source "$fixture_source" \
   --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity coarse \
@@ -131,6 +166,30 @@ real_run_dir=$(printf '%s\n' "$output" | sed -n 's/^RUN_DIRECTORY=//p')
 [[ -f "$real_run_dir/manifest.txt" ]] || fail "real-path manifest was not written"
 [[ "$(<"$real_run_dir/exit_code.txt")" == 0 ]] ||
   fail "real-path exit code was not preserved"
+assert_contains "$(<"$real_run_dir/manifest.txt")" \
+  "build_revision=0123456789ab"
+assert_contains "$(<"$real_run_dir/manifest.txt")" \
+  "executable_sha256=$fixture_executable_sha"
+
+sed -i 's/revision=0123456789ab/revision=deadbeefdead/' \
+  "$fixture_build/couplings/ibamr/build_manifest.txt"
+output=$(bash "$run_script" smoke --source "$fixture_source" \
+  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity coarse \
+  --training couplings/ibamr/configs/training/smoke.json --smoke-steps 1)
+assert_contains "$output" "fixture coupling rebuilt and completed"
+[[ -f "$fixture_build/rebuild-called.txt" ]] ||
+  fail "stale build revision did not trigger build_node3.sh"
+assert_contains "$(<"$fixture_build/couplings/ibamr/build_manifest.txt")" \
+  "revision=0123456789ab"
+
+rm "$fixture_build/rebuild-called.txt"
+printf '# tampered\n' >>"$fixture_build/couplings/ibamr/ibamr_eel2d_smoke"
+output=$(bash "$run_script" smoke --source "$fixture_source" \
+  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity coarse \
+  --training couplings/ibamr/configs/training/smoke.json --smoke-steps 1)
+assert_contains "$output" "fixture coupling rebuilt and completed"
+[[ -f "$fixture_build/rebuild-called.txt" ]] ||
+  fail "executable hash mismatch did not trigger build_node3.sh"
 
 if capture_status "$fixture_root/envs-zero.log" bash "$run_script" smoke \
   --dry-run --envs 0 --ranks-per-env 1; then
