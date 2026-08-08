@@ -6,7 +6,9 @@ Unverified hypotheses, research notes, partial logs, failed attempts, and candid
 
 ## Verified records
 
-None admitted under the current evidence gate.
+| Record | Exact verified scope | Implementation revision |
+|---|---|---|
+| [eel2d stage-one lifecycle](verified/2026-08-08-eel2d-stage1-lifecycle.md) | IBAMR 0.18.0 eel2d lifecycle, specified MPI topologies, normal shutdown, and coordinated fatal failure on node03 | `1b8d437a54f5` |
 
 ## Legacy documents pending audit
 
