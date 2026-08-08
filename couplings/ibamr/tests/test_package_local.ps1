@@ -102,6 +102,13 @@ if ($metadata -notcontains "tracked_dirty=$expectedDirty") {
 }
 
 $manifestPath = Join-Path $extract 'SOURCE_MANIFEST.sha256'
+if ([IO.File]::ReadAllBytes($manifestPath) -contains 13) {
+    throw 'source manifest contains CR bytes; node3 requires LF line endings'
+}
+$metadataPath = Join-Path $extract 'SOURCE_METADATA.txt'
+if ([IO.File]::ReadAllBytes($metadataPath) -contains 13) {
+    throw 'source metadata contains CR bytes; node3 requires LF line endings'
+}
 foreach ($line in Get-Content -LiteralPath $manifestPath) {
     if ($line -notmatch '^([0-9a-f]{64})  (.+)$') {
         throw "malformed source manifest line: $line"

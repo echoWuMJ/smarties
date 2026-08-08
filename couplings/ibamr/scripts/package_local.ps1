@@ -79,31 +79,27 @@ foreach ($relative in $files) {
 }
 
 $metadata = Join-Path $stage 'SOURCE_METADATA.txt'
-@(
+$metadataLines = @(
     "revision=$fullRevision"
     "short_revision=$revision"
     "tracked_dirty=$trackedDirty"
     "included_untracked_count=$($allowedUntracked.Count)"
     "excluded_gitlink_count=$($excludedGitlinks.Count)"
-) + @($allowedUntracked | ForEach-Object { "included_untracked=$_" }) |
-    ForEach-Object { $_ } |
-    Set-Content -Encoding ascii $metadata
-
-if ($excludedGitlinks.Count -gt 0) {
-    @($excludedGitlinks | ForEach-Object { "excluded_gitlink=$_" }) |
-        Add-Content -Encoding ascii $metadata
-}
+) + @($allowedUntracked | ForEach-Object { "included_untracked=$_" }) +
+    @($excludedGitlinks | ForEach-Object { "excluded_gitlink=$_" })
+$ascii = New-Object System.Text.ASCIIEncoding
+[IO.File]::WriteAllText($metadata, ($metadataLines -join "`n") + "`n", $ascii)
 
 $manifest = Join-Path $stage 'SOURCE_MANIFEST.sha256'
-Get-ChildItem -LiteralPath $stage -Recurse -File |
+$manifestLines = @(Get-ChildItem -LiteralPath $stage -Recurse -File |
     Where-Object FullName -ne $manifest |
     Sort-Object FullName |
     ForEach-Object {
         $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
         $relative = $_.FullName.Substring($stage.Length + 1).Replace('\', '/')
         "$hash  $relative"
-    } |
-    Set-Content -Encoding ascii $manifest
+    })
+[IO.File]::WriteAllText($manifest, ($manifestLines -join "`n") + "`n", $ascii)
 
 $archive = Join-Path $OutputDirectory "$name.tar.gz"
 if (Test-Path -LiteralPath $archive) {
