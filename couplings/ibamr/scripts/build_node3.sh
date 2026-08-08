@@ -5,6 +5,7 @@ set -euo pipefail
 readonly DEFAULT_ENV_SCRIPT=/data2/mjwu/autoibamr-v0.18.0/configuration/enable.sh
 readonly EXPECTED_IBAMR_ROOT=/data2/mjwu/autoibamr-v0.18.0/packages/IBAMR-0.18.0
 readonly DEFAULT_IBAMR_OVERLAY=/data2/mjwu/local/coupling-deps/ibamr-0.18.0-samrai-subcomm-v1
+readonly DEFAULT_PETSC_ROOT=/data2/mjwu/autoibamr-v0.18.0/packages/petsc-3.23.3
 readonly GCC=/data2/mjwu/local/gcc-8.5.0/bin/gcc
 readonly GXX=/data2/mjwu/local/gcc-8.5.0/bin/g++
 
@@ -155,11 +156,23 @@ build_manifest="$build_dir/couplings/ibamr/build_manifest.txt"
 [[ $revision != unknown ]] || die "cannot determine source revision: $source_dir"
 [[ -x "$executable" ]] || die "build did not produce executable: $executable"
 executable_sha256=$(sha256sum "$executable" | awk '{print $1}')
+patch_marker="$ibamr_overlay/PATCHED_SMARTIES_SAMRAI.sha256"
+[[ -f "$patch_marker" ]] || die "SAMRAI patch marker is missing: $patch_marker"
+samrai_patch_sha256=$(<"$patch_marker")
+[[ $samrai_patch_sha256 =~ ^[0-9a-f]{64}$ ]] ||
+  die "invalid SAMRAI patch marker: $patch_marker"
+petsc_root=${PETSC_DIR:-$DEFAULT_PETSC_ROOT}
 manifest_tmp="$build_manifest.tmp.$$"
 {
   printf 'revision=%s\n' "$revision"
   printf 'source=%s\n' "$source_dir"
   printf 'executable_sha256=%s\n' "$executable_sha256"
+  printf 'ibamr_root=%s\n' "$IBAMR_ROOT"
+  printf 'ibamr_version=0.18.0\n'
+  printf 'petsc_root=%s\n' "$petsc_root"
+  printf 'petsc_version=3.23.3\n'
+  printf 'samrai_overlay=%s\n' "$ibamr_overlay"
+  printf 'samrai_patch_sha256=%s\n' "$samrai_patch_sha256"
 } >"$manifest_tmp"
 mv "$manifest_tmp" "$build_manifest"
 printf 'BUILD_MANIFEST=%s\n' "$build_manifest"

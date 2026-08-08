@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -26,6 +27,7 @@ struct SmokeOptions
 {
   std::string input_file = "input2d";
   unsigned smoke_steps = 1;
+  bool fault_after_initialize = false;
 };
 
 [[noreturn]] void abortInvalidOption(MPI_Comm comm, const char* message)
@@ -63,9 +65,24 @@ SmokeOptions parseSmokeOptions(int argc, char** argv, MPI_Comm comm)
       if (++i >= argc) abortInvalidOption(comm, "missing value after --smoke-steps");
       options.smoke_steps = parsePositiveUnsigned(argv[i], comm);
     }
+    else if (argument == "--fault-after-initialize") {
+      options.fault_after_initialize = true;
+    }
   }
   if (options.input_file.empty()) abortInvalidOption(comm, "--input-file must not be empty");
   return options;
+}
+
+[[noreturn]] void abortEnvironmentFailure(MPI_Comm comm, const char* message)
+{
+  int rank = 0;
+  MPI_Comm_rank(comm, &rank);
+  if (rank == 0) {
+    std::fprintf(stderr, "eel2d environment fatal error: %s\n", message);
+    std::fflush(stderr);
+  }
+  MPI_Abort(comm, 98);
+  std::abort();
 }
 
 } // namespace
@@ -82,12 +99,16 @@ void runSmokeEpisode(smarties::Communicator* const comm,
 
   const SmokeOptions options = parseSmokeOptions(argc, argv, environment_comm);
 
-  comm->setStateActionDims(1, 1);
-  comm->setActionScales({ 1.0 }, { -1.0 }, true);
+  try {
+    comm->setStateActionDims(1, 1);
+    comm->setActionScales({ 1.0 }, { -1.0 }, true);
 
-  EelEnvironment environment;
-  environment.initialize(environment_comm, options.input_file);
-  comm->sendInitState({ 0.0 });
+    EelEnvironment environment;
+    environment.initialize(environment_comm, options.input_file);
+    if (options.fault_after_initialize) {
+      throw std::runtime_error("injected failure after IBAMR initialization");
+    }
+    comm->sendInitState({ 0.0 });
 
   for (unsigned step = 0;
        step < options.smoke_steps && environment.stepsRemaining();
@@ -148,7 +169,14 @@ void runSmokeEpisode(smarties::Communicator* const comm,
     MPI_Abort(environment_comm, 97);
   }
 
-  environment.shutdown();
+    environment.shutdown();
+  }
+  catch (const std::exception& error) {
+    abortEnvironmentFailure(environment_comm, error.what());
+  }
+  catch (...) {
+    abortEnvironmentFailure(environment_comm, "unknown exception");
+  }
 }
 
 SmokeProtocolReport lastSmokeProtocolReport()

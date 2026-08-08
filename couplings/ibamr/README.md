@@ -48,6 +48,21 @@ The overlay is content-guarded by the SHA-256 of
 `patches/ibsamrai2-subcommunicator.patch`; a stale or partial overlay is not
 silently reused.
 
+Create the snapshot locally with:
+
+```powershell
+.\couplings\ibamr\scripts\package_local.ps1 `
+  -Repository . `
+  -OutputDirectory .artifacts\packages
+```
+
+Packages contain tracked files only by default. A required untracked file must
+be named explicitly with `-IncludeUntracked`; unrelated untracked work is never
+copied implicitly. `SOURCE_METADATA.txt` records the full Git revision, tracked
+dirty state, allowlisted files, and excluded gitlinks. After extraction,
+`SOURCE_MANIFEST.sha256` validates every packaged source and metadata file from
+the archive root.
+
 ## One-command smoke run
 
 From the source snapshot:
@@ -78,6 +93,12 @@ directory. A real run verifies its source revision, source path, and executable
 SHA-256. If the executable is missing, stale, or changed, `run_node3.sh`
 automatically invokes the matching snapshot's `build_node3.sh` before MPI is
 started. The run manifest records both source and verified build identities.
+It also records the host, OS/kernel, compiler and MPI wrapper identities,
+IBAMR/PETSc roots and versions, and the isolated SAMRAI overlay patch hash.
+
+`--fault-after-initialize` is a test-only failure injection. It starts MPI and
+initializes the real IBAMR environment, then exercises the fatal callback path;
+the environment communicator is aborted without any private `MPI_Finalize`.
 
 `train` intentionally exits with status 64. It will remain disabled until the
 fish control variable, state vector, reward, time horizon, and safety limits are

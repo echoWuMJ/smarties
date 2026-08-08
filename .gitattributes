@@ -1,0 +1,2 @@
+# Exact IBAMR 0.18.0 upstream fixture; preserve its formatting and provenance hash.
+couplings/ibamr/cases/eel2d/upstream/input2d.in whitespace=-blank-at-eol

@@ -80,9 +80,10 @@ ExecutionInfo::~ExecutionInfo()
     for(int i=0; i<argc; ++i) delete [] argv[i];
     delete [] argv;
   }
-  const auto freeMPIcom = [] (MPI_Comm C) {
+  const auto freeMPIcom = [this] (MPI_Comm C) {
     if (C==MPI_COMM_SELF) return;
     if (C==MPI_COMM_NULL) return;
+    if (C==world_comm) return;
     MPI_Comm_free(&C);
   };
   freeMPIcom(master_workers_comm);

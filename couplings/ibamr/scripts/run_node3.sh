@@ -21,6 +21,7 @@ Smoke options:
   --fidelity LEVEL         coarse, medium, fine, or curriculum (default: coarse)
   --training FILE          Smarties JSON settings file
   --smoke-steps N          IBAMR steps in the lifecycle episode (default: 1)
+  --fault-after-initialize Test-only coordinated failure after IBAMR starts
   --source DIR             Immutable Smarties source snapshot
   --build DIR              Matching node3 build directory
   --dry-run                Validate and print the derived launch command
@@ -105,6 +106,7 @@ training=couplings/ibamr/configs/training/smoke.json
 smoke_steps=1
 build_dir=
 dry_run=0
+fault_after_initialize=0
 
 while (($#)); do
   case $1 in
@@ -126,6 +128,10 @@ while (($#)); do
       ;;
     --dry-run)
       dry_run=1
+      shift
+      ;;
+    --fault-after-initialize)
+      fault_after_initialize=1
       shift
       ;;
     -h|--help)
@@ -187,7 +193,14 @@ build_is_current()
   [[ "$recorded_source" == "$source_dir" ]] || return 1
   [[ $recorded_sha =~ ^[0-9a-f]{64}$ ]] || return 1
   actual_sha=$(sha256sum "$executable" | awk '{print $1}')
-  [[ "$actual_sha" == "$recorded_sha" ]]
+  [[ "$actual_sha" == "$recorded_sha" ]] || return 1
+  local key value
+  for key in ibamr_root ibamr_version petsc_root petsc_version samrai_overlay; do
+    value=$(manifest_value "$key" "$build_manifest")
+    [[ -n "$value" ]] || return 1
+  done
+  value=$(manifest_value samrai_patch_sha256 "$build_manifest")
+  [[ $value =~ ^[0-9a-f]{64}$ ]]
 }
 
 if ((dry_run)); then
@@ -211,11 +224,35 @@ if [[ $build_status == current ]]; then
   build_revision=$(manifest_value revision "$build_manifest")
   executable_sha256=$(manifest_value executable_sha256 "$build_manifest")
   build_manifest_sha256=$(sha256sum "$build_manifest" | awk '{print $1}')
+  ibamr_build_root=$(manifest_value ibamr_root "$build_manifest")
+  ibamr_version=$(manifest_value ibamr_version "$build_manifest")
+  petsc_root=$(manifest_value petsc_root "$build_manifest")
+  petsc_version=$(manifest_value petsc_version "$build_manifest")
+  samrai_overlay=$(manifest_value samrai_overlay "$build_manifest")
+  samrai_patch_sha256=$(manifest_value samrai_patch_sha256 "$build_manifest")
 else
   build_revision=unbuilt
   executable_sha256=unbuilt
   build_manifest_sha256=unbuilt
+  ibamr_build_root=unbuilt
+  ibamr_version=unbuilt
+  petsc_root=unbuilt
+  petsc_version=unbuilt
+  samrai_overlay=unbuilt
+  samrai_patch_sha256=unbuilt
 fi
+
+hostname_value=$(hostname)
+kernel_value=$(uname -sr)
+if [[ -r /etc/os-release ]]; then
+  os_pretty=$( (source /etc/os-release; printf '%s' "${PRETTY_NAME:-unknown}") )
+else
+  os_pretty=unknown
+fi
+mpi_version=$(mpiexec --version 2>&1 | sed -n '1p')
+mpicc_command=$(mpicc --showme:command)
+mpicxx_command=$(mpicxx --showme:command)
+env_script_used=${SMARTIES_IBAMR_ENV_SCRIPT:-$DEFAULT_ENV_SCRIPT}
 
 launch_args=(
   --nMasters "$learner_ranks"
@@ -230,10 +267,14 @@ launch_args=(
   --smoke-steps "$smoke_steps"
 )
 
+if ((fault_after_initialize)); then
+  launch_args+=(--fault-after-initialize)
+fi
+
 if [[ $fidelity == curriculum ]]; then
   launch_args+=(
-    --appSettings "app-coarse.args;app-medium.args;app-fine.args"
-    --nStepPappSett "1;1;0"
+    --appSettings "app-coarse.args,app-medium.args,app-fine.args"
+    --nStepPappSett "1,1,0"
   )
 fi
 command=(mpiexec -n "$mpi_ranks" "$executable" "${launch_args[@]}")
@@ -292,6 +333,19 @@ manifest="$run_dir/manifest.txt"
   printf 'build_revision=%s\n' "$build_revision"
   printf 'build_manifest_sha256=%s\n' "$build_manifest_sha256"
   printf 'executable_sha256=%s\n' "$executable_sha256"
+  printf 'hostname=%s\n' "$hostname_value"
+  printf 'os=%s\n' "$os_pretty"
+  printf 'kernel=%s\n' "$kernel_value"
+  printf 'environment_script=%s\n' "$env_script_used"
+  printf 'mpi_version=%s\n' "$mpi_version"
+  printf 'mpicc_command=%s\n' "$mpicc_command"
+  printf 'mpicxx_command=%s\n' "$mpicxx_command"
+  printf 'ibamr_root=%s\n' "$ibamr_build_root"
+  printf 'ibamr_version=%s\n' "$ibamr_version"
+  printf 'petsc_root=%s\n' "$petsc_root"
+  printf 'petsc_version=%s\n' "$petsc_version"
+  printf 'samrai_overlay=%s\n' "$samrai_overlay"
+  printf 'samrai_patch_sha256=%s\n' "$samrai_patch_sha256"
   printf 'learner_ranks=%s\n' "$learner_ranks"
   printf 'environment_count=%s\n' "$envs"
   printf 'ranks_per_environment=%s\n' "$ranks_per_env"
@@ -299,6 +353,7 @@ manifest="$run_dir/manifest.txt"
   printf 'fidelity=%s\n' "$fidelity"
   printf 'training=%s\n' "$training"
   printf 'smoke_steps=%s\n' "$smoke_steps"
+  printf 'fault_after_initialize=%s\n' "$fault_after_initialize"
   printf 'gcc_version=%s\n' "$(gcc -dumpfullversion -dumpversion)"
   printf 'gxx_version=%s\n' "$(g++ -dumpfullversion -dumpversion)"
   printf 'input_sha256=%s\n' "$(sha256sum "$run_dir/input2d" | awk '{print $1}')"

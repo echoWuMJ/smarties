@@ -1,6 +1,16 @@
 add_executable(borrowed_engine_shutdown test_borrowed_engine_shutdown.cpp)
 target_link_libraries(borrowed_engine_shutdown PRIVATE libsmarties MPI::MPI_CXX)
 
+add_executable(borrowed_communicator_alias test_borrowed_communicator_alias.cpp)
+target_include_directories(borrowed_communicator_alias PRIVATE
+  "${PROJECT_SOURCE_DIR}/source")
+target_link_libraries(borrowed_communicator_alias PRIVATE libsmarties MPI::MPI_CXX)
+
+add_executable(curriculum_arguments test_curriculum_arguments.cpp)
+target_include_directories(curriculum_arguments PRIVATE
+  "${PROJECT_SOURCE_DIR}/source")
+target_link_libraries(curriculum_arguments PRIVATE libsmarties MPI::MPI_CXX)
+
 add_executable(owned_engine_shutdown test_owned_engine_shutdown.cpp)
 target_link_libraries(owned_engine_shutdown PRIVATE libsmarties MPI::MPI_CXX)
 
@@ -14,6 +24,18 @@ add_test(
   NAME borrowed_engine_shutdown
   COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
           ${MPIEXEC_PREFLAGS} $<TARGET_FILE:borrowed_engine_shutdown>
+          ${MPIEXEC_POSTFLAGS})
+
+add_test(
+  NAME borrowed_communicator_alias
+  COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
+          ${MPIEXEC_PREFLAGS} $<TARGET_FILE:borrowed_communicator_alias>
+          ${MPIEXEC_POSTFLAGS})
+
+add_test(
+  NAME curriculum_arguments
+  COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
+          ${MPIEXEC_PREFLAGS} $<TARGET_FILE:curriculum_arguments>
           ${MPIEXEC_POSTFLAGS})
 
 add_test(NAME owned_engine_shutdown COMMAND owned_engine_shutdown)
@@ -99,4 +121,25 @@ if(BUILD_IBAMR_COUPLING)
   set_tests_properties(eel_smoke_protocol PROPERTIES
     WORKING_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}"
     TIMEOUT 300)
+
+  add_test(
+    NAME eel_smoke_failure_after_mpi
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 3
+            ${MPIEXEC_PREFLAGS} $<TARGET_FILE:eel_smoke_protocol>
+            --nMasters 1
+            --nThreads 1
+            --nEnvironments 1
+            --workerProcessesPerEnv 2
+            --learnersOnWorkers 0
+            --nTrainSteps 0
+            --restart none
+            --setupFolder .
+            --input-file input2d
+            --smoke-steps 1
+            --fault-after-initialize
+            ${MPIEXEC_POSTFLAGS})
+  set_tests_properties(eel_smoke_failure_after_mpi PROPERTIES
+    WORKING_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}"
+    TIMEOUT 300
+    WILL_FAIL TRUE)
 endif()

@@ -42,6 +42,10 @@ done
 EOF
 cat >"$fixture_root/bin/mpiexec" <<'EOF'
 #!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'Open MPI fixture 5.0.9\n'
+  exit 0
+fi
 [[ "${1:-}" == "-n" ]]
 shift 2
 "$@"
@@ -105,6 +109,17 @@ output=$(bash "$run_script" smoke --dry-run --envs 2 --ranks-per-env 2 \
 assert_contains "$output" "ENVIRONMENT_RANKS=4"
 assert_contains "$output" "MPI_RANKS=5"
 
+output=$(bash "$run_script" smoke --dry-run --envs 1 --ranks-per-env 1 \
+  --fidelity curriculum \
+  --training couplings/ibamr/configs/training/smoke.json --smoke-steps 1)
+assert_contains "$output" 'app-coarse.args\,app-medium.args\,app-fine.args'
+assert_contains "$output" '1\,1\,0'
+
+output=$(bash "$run_script" smoke --dry-run --envs 1 --ranks-per-env 2 \
+  --fidelity coarse --fault-after-initialize \
+  --training couplings/ibamr/configs/training/smoke.json --smoke-steps 1)
+assert_contains "$output" "--fault-after-initialize"
+
 fixture_source="$fixture_root/smarties-fixture-0123456789ab"
 fixture_build="$fixture_root/build-real"
 mkdir -p "$fixture_source/couplings/ibamr/configs/fidelity" \
@@ -128,6 +143,12 @@ cat >"$fixture_build/couplings/ibamr/build_manifest.txt" <<EOF
 revision=0123456789ab
 source=$fixture_source
 executable_sha256=$fixture_executable_sha
+ibamr_root=/fixture/IBAMR-0.18.0
+ibamr_version=0.18.0
+petsc_root=/fixture/petsc-3.23.3
+petsc_version=3.23.3
+samrai_overlay=/fixture/overlay
+samrai_patch_sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 EOF
 cat >"$fixture_source/couplings/ibamr/scripts/build_node3.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -153,6 +174,12 @@ cat >"$build_dir/couplings/ibamr/build_manifest.txt" <<MANIFEST
 revision=0123456789ab
 source=$source_dir
 executable_sha256=$executable_sha
+ibamr_root=/fixture/IBAMR-0.18.0
+ibamr_version=0.18.0
+petsc_root=/fixture/petsc-3.23.3
+petsc_version=3.23.3
+samrai_overlay=/fixture/overlay
+samrai_patch_sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 MANIFEST
 printf 'rebuilt\n' >"$build_dir/rebuild-called.txt"
 EOF
@@ -170,6 +197,14 @@ assert_contains "$(<"$real_run_dir/manifest.txt")" \
   "build_revision=0123456789ab"
 assert_contains "$(<"$real_run_dir/manifest.txt")" \
   "executable_sha256=$fixture_executable_sha"
+assert_contains "$(<"$real_run_dir/manifest.txt")" \
+  "mpi_version=Open MPI fixture 5.0.9"
+assert_contains "$(<"$real_run_dir/manifest.txt")" \
+  "ibamr_root=/fixture/IBAMR-0.18.0"
+assert_contains "$(<"$real_run_dir/manifest.txt")" \
+  "petsc_version=3.23.3"
+assert_contains "$(<"$real_run_dir/manifest.txt")" \
+  "samrai_patch_sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 sed -i 's/revision=0123456789ab/revision=deadbeefdead/' \
   "$fixture_build/couplings/ibamr/build_manifest.txt"
