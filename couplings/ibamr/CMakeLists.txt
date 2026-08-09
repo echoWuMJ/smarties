@@ -6,6 +6,12 @@ target_include_directories(ibamr_coupling_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/core)
 target_link_libraries(ibamr_coupling_core PUBLIC MPI::MPI_CXX libsmarties)
 
+add_library(ibamr_eel_control STATIC
+  cases/eel2d/TailBeatPhase.cpp)
+target_include_directories(ibamr_eel_control PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/cases/eel2d)
+target_compile_features(ibamr_eel_control PUBLIC cxx_std_14)
+
 if(BUILD_IBAMR_COUPLING)
   find_package(IBAMR CONFIG REQUIRED
     PATHS "$ENV{IBAMR_ROOT}/lib64/cmake/ibamr"
