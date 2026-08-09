@@ -15,6 +15,8 @@
 #define included_IBEELKinematics
 
 /////////////////////////////////////// INCLUDES ////////////////////////////////
+#include "TailBeatPhase.h"
+
 #include "ibamr/ConstraintIBKinematics.h"
 
 #include "PatchHierarchy.h"
@@ -87,6 +89,20 @@ public:
      * \see IBAMR::ConstraintIBKinematics::getShape
      */
     virtual const std::vector<std::vector<double> >& getShape(const int level) const;
+
+    /*!
+     * \brief Change only the temporal frequency of the official eel wave.
+     *
+     * The effective time is an IBAMR control-safe point. The accumulated
+     * phase remains continuous across the command boundary.
+     */
+    void setTailBeatFrequencyRatio(double ratio, double effective_time);
+
+    double getTailBeatFrequencyRatio() const;
+
+    double getTailBeatPhase(double time) const;
+
+    double getTailBeatAngularFrequency() const;
 
     /*!
      * \brief Override the ConstraintIBkinematics base class method.
@@ -237,8 +253,16 @@ private:
      * Time and position variables.
      */
     mutable double d_parser_time;
+    mutable double d_parser_phase;
+    mutable double d_parser_angular_frequency;
     mutable IBTK::Point d_parser_posn;
     mutable IBTK::Point d_parser_normal;
+
+    /*!
+     * Continuous temporal phase layered onto the official eel2d geometry and
+     * amplitude envelope. The official angular frequency is exactly 6.28.
+     */
+    ibamr_smarties::eel2d::TailBeatPhase d_tail_beat_phase;
 
     /*!
      * Array containing initial coordinates of the food location.

@@ -25,6 +25,11 @@ target_include_directories(tail_beat_phase_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d)
 target_link_libraries(tail_beat_phase_test PRIVATE ibamr_eel_control)
 
+add_executable(official_eel_formula_test test_official_eel_formula.cpp)
+target_include_directories(official_eel_formula_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d)
+target_link_libraries(official_eel_formula_test PRIVATE ibamr_eel_control)
+
 add_test(
   NAME borrowed_engine_shutdown
   COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
@@ -48,6 +53,8 @@ add_test(NAME owned_engine_shutdown COMMAND owned_engine_shutdown)
 add_test(NAME mpi_session COMMAND mpi_session)
 
 add_test(NAME tail_beat_phase COMMAND tail_beat_phase_test)
+
+add_test(NAME official_eel_formula COMMAND official_eel_formula_test)
 
 if(UNIX)
   add_test(

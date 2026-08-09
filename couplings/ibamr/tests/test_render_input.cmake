@@ -38,6 +38,21 @@ function(assert_rendered_fidelity NAME EXPECTED_N EXPECTED_LEVELS EXPECTED_RATIO
   if(NOT CMAKE_MATCH_2 STREQUAL "${EXPECTED_RATIO}")
     message(FATAL_ERROR "${NAME}: expected REF_RATIO = ${EXPECTED_RATIO}, got '${CMAKE_MATCH_2}'")
   endif()
+
+  string(FIND "${CONTENT}" "PHI" PHASE_VARIABLE_INDEX)
+  if(PHASE_VARIABLE_INDEX EQUAL -1)
+    message(FATAL_ERROR "${NAME}: rendered eel kinematics do not use continuous PHI")
+  endif()
+
+  string(FIND "${CONTENT}" "OMEGA" OMEGA_VARIABLE_INDEX)
+  if(OMEGA_VARIABLE_INDEX EQUAL -1)
+    message(FATAL_ERROR "${NAME}: rendered eel velocity does not use controlled OMEGA")
+  endif()
+
+  string(FIND "${CONTENT}" "(0.785/0.125)*T" FIXED_TIME_INDEX)
+  if(NOT FIXED_TIME_INDEX EQUAL -1)
+    message(FATAL_ERROR "${NAME}: rendered eel kinematics still use the fixed temporal phase")
+  endif()
 endfunction()
 
 assert_rendered_fidelity(coarse 32 2 4)

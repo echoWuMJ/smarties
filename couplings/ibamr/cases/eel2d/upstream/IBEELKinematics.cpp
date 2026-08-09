@@ -67,7 +67,10 @@ IBEELKinematics::IBEELKinematics(const std::string& object_name,
       d_incremented_angle_from_reference_axis(3),
       d_tagged_pt_position(3),
       d_mesh_width(NDIM),
-      d_parser_time(0.0)
+      d_parser_time(0.0),
+      d_parser_phase(0.0),
+      d_parser_angular_frequency(6.28),
+      d_tail_beat_phase(6.28, 0.0)
 {
     // Read from inputdb
     d_initAngle_bodyAxis_x = input_db->getDoubleWithDefault("initial_angle_body_axis_0", 0.0);
@@ -127,6 +130,8 @@ IBEELKinematics::IBEELKinematics(const std::string& object_name,
         // Variables
         (*cit)->DefineVar("T", &d_parser_time);
         (*cit)->DefineVar("t", &d_parser_time);
+        (*cit)->DefineVar("PHI", &d_parser_phase);
+        (*cit)->DefineVar("OMEGA", &d_parser_angular_frequency);
         for (int d = 0; d < NDIM; ++d)
         {
             const std::string postfix = std::to_string(d);
@@ -365,6 +370,8 @@ IBEELKinematics::setEelSpecificVelocity(const double time,
                                         const std::vector<double>& tagged_pt_position)
 {
     d_parser_time = time;
+    d_parser_phase = d_tail_beat_phase.valueAt(time);
+    d_parser_angular_frequency = d_tail_beat_phase.angularFrequency();
     const double angleFromHorizontal = d_initAngle_bodyAxis_x + incremented_angle_from_reference_axis[2];
 
     if (d_bodyIsManeuvering)
@@ -563,6 +570,8 @@ IBEELKinematics::setShape(const double time, const std::vector<double>& /*increm
     // Find the deformed shape. Rotate the shape about center of mass.
     TBOX_ASSERT(d_new_time == time);
     d_parser_time = time;
+    d_parser_phase = d_tail_beat_phase.valueAt(time);
+    d_parser_angular_frequency = d_tail_beat_phase.angularFrequency();
     std::vector<double> shape_new(NDIM);
 
     int lag_idx = -1;
@@ -661,5 +670,29 @@ IBEELKinematics::getShape(const int /*level*/) const
 {
     return d_shape;
 } // getShape
+
+void
+IBEELKinematics::setTailBeatFrequencyRatio(const double ratio, const double effective_time)
+{
+    d_tail_beat_phase.setFrequencyRatio(ratio, effective_time);
+}
+
+double
+IBEELKinematics::getTailBeatFrequencyRatio() const
+{
+    return d_tail_beat_phase.frequencyRatio();
+}
+
+double
+IBEELKinematics::getTailBeatPhase(const double time) const
+{
+    return d_tail_beat_phase.valueAt(time);
+}
+
+double
+IBEELKinematics::getTailBeatAngularFrequency() const
+{
+    return d_tail_beat_phase.angularFrequency();
+}
 
 } // namespace IBAMR

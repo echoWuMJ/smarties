@@ -20,8 +20,11 @@ if(BUILD_IBAMR_COUPLING)
   add_library(ibamr_eel2d_support STATIC
     cases/eel2d/upstream/IBEELKinematics.cpp)
   target_include_directories(ibamr_eel2d_support PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/cases/eel2d/upstream)
-  target_link_libraries(ibamr_eel2d_support PUBLIC IBAMR::IBAMR2d)
+    ${CMAKE_CURRENT_SOURCE_DIR}/cases/eel2d/upstream
+    ${CMAKE_CURRENT_SOURCE_DIR}/cases/eel2d)
+  target_link_libraries(ibamr_eel2d_support PUBLIC
+    ibamr_eel_control
+    IBAMR::IBAMR2d)
 
   add_library(ibamr_eel2d_environment STATIC
     cases/eel2d/EelEnvironment.cpp)
