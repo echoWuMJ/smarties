@@ -27,7 +27,7 @@ option(BUILD_IBAMR_COUPLING_TESTS "Build IBAMR coupling tests" OFF)
 
 set(root_folder ${CMAKE_CURRENT_LIST_DIR})
 set(source_dir ${root_folder}/source)
-set(lib_output ${root_folder}/lib)
+set(lib_output ${CMAKE_BINARY_DIR}/lib)
 
 set(smarties_sources
     ${source_dir}/smarties/Learners/PPO.cpp

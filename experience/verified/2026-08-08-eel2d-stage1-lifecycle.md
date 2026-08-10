@@ -38,7 +38,7 @@ The patch guard applies the tracked patch to the exact node3 source, rejects a s
 
 ## Resolution
 
-`prepare_node3_ibamr.sh` builds a content-guarded SAMRAI/IBAMR overlay at `/data2/mjwu/local/coupling-deps/ibamr-0.18.0-samrai-subcomm-v1`; the shared autoibamr installation remains unchanged. `build_node3.sh` records source, executable, IBAMR/PETSc, overlay, and patch identities. `run_node3.sh` rejects or rebuilds a missing, stale, or modified executable before MPI launch and records the verified build and environment provenance in every run manifest.
+`prepare_node3_ibamr.sh` builds a SAMRAI/IBAMR overlay at `/data2/mjwu/local/coupling-deps/ibamr-0.18.0-samrai-subcomm-v1`; the shared autoibamr installation remains unchanged. Overlay reuse checks that the patch marker matches the tracked patch SHA-256 and that the required `IBAMRConfig.cmake` exists. It does not hash or fully authenticate the installed overlay libraries. `build_node3.sh` records source, executable, IBAMR/PETSc, overlay, and patch identities. `run_node3.sh` rejects or rebuilds a missing, stale, or modified executable before MPI launch and records the verified build and environment provenance in every run manifest.
 
 The fixed architecture is preserved: `CouplingDriver` alone initializes/finalizes MPI; Smarties borrows the driver communicator and does not free caller aliases; learner ranks do not initialize IBAMR; each environment uses its Smarties-created subcommunicator; and no process forks after MPI initialization. Unrecoverable callback exceptions are logged once and end with `MPI_Abort` on the environment communicator, never private `MPI_Finalize` recovery.
 

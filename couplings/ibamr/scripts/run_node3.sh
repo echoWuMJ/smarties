@@ -267,6 +267,7 @@ timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 run_id="eel2d-${timestamp}-${revision}-$$"
 run_dir="$source_dir/couplings/ibamr/runs/$run_id"
 executable="$build_dir/couplings/ibamr/ibamr_eel2d_smoke"
+runtime_library="$build_dir/lib/libsmarties.so"
 build_manifest="$build_dir/couplings/ibamr/build_manifest.txt"
 build_script="$source_dir/couplings/ibamr/scripts/build_node3.sh"
 fidelity_dir="$source_dir/couplings/ibamr/configs/fidelity"
@@ -277,18 +278,29 @@ preflight
 
 build_is_current()
 {
-  [[ -x "$executable" && -f "$build_manifest" ]] || return 1
+  [[ -x "$executable" && -f "$runtime_library" &&
+     -f "$build_manifest" ]] || return 1
   local recorded_revision recorded_source recorded_executable recorded_sha actual_sha
+  local recorded_runtime_library recorded_runtime_library_sha
+  local actual_runtime_library_sha
   recorded_revision=$(manifest_value revision "$build_manifest")
   recorded_source=$(manifest_value source "$build_manifest")
   recorded_sha=$(manifest_value executable_sha256 "$build_manifest")
   recorded_executable=$(manifest_value executable "$build_manifest")
+  recorded_runtime_library=$(manifest_value runtime_library "$build_manifest")
+  recorded_runtime_library_sha=$(
+    manifest_value runtime_library_sha256 "$build_manifest")
   [[ "$recorded_revision" == "$revision" ]] || return 1
   [[ "$recorded_source" == "$source_dir" ]] || return 1
   [[ "$recorded_executable" == "$executable" ]] || return 1
+  [[ "$recorded_runtime_library" == "$runtime_library" ]] || return 1
   [[ $recorded_sha =~ ^[0-9a-f]{64}$ ]] || return 1
+  [[ $recorded_runtime_library_sha =~ ^[0-9a-f]{64}$ ]] || return 1
   actual_sha=$(sha256sum "$executable" | awk '{print $1}')
+  actual_runtime_library_sha=$(sha256sum "$runtime_library" | awk '{print $1}')
   [[ "$actual_sha" == "$recorded_sha" ]] || return 1
+  [[ "$actual_runtime_library_sha" == "$recorded_runtime_library_sha" ]] ||
+    return 1
   local key value
   for key in ibamr_root ibamr_version petsc_root petsc_version samrai_overlay; do
     value=$(manifest_value "$key" "$build_manifest")
@@ -318,6 +330,7 @@ fi
 if [[ $build_status == current ]]; then
   build_revision=$(manifest_value revision "$build_manifest")
   executable_sha256=$(manifest_value executable_sha256 "$build_manifest")
+  runtime_library_sha256=$(manifest_value runtime_library_sha256 "$build_manifest")
   build_manifest_sha256=$(sha256sum "$build_manifest" | awk '{print $1}')
   ibamr_build_root=$(manifest_value ibamr_root "$build_manifest")
   ibamr_version=$(manifest_value ibamr_version "$build_manifest")
@@ -328,6 +341,8 @@ if [[ $build_status == current ]]; then
 else
   build_revision=unbuilt
   executable_sha256=unbuilt
+  runtime_library=unbuilt
+  runtime_library_sha256=unbuilt
   build_manifest_sha256=unbuilt
   ibamr_build_root=unbuilt
   ibamr_version=unbuilt
@@ -435,6 +450,8 @@ manifest="$run_dir/manifest.txt"
   printf 'build_manifest_sha256=%s\n' "$build_manifest_sha256"
   printf 'executable_sha256=%s\n' "$executable_sha256"
   printf 'executable=%s\n' "$executable"
+  printf 'runtime_library=%s\n' "$runtime_library"
+  printf 'runtime_library_sha256=%s\n' "$runtime_library_sha256"
   printf 'hostname=%s\n' "$hostname_value"
   printf 'os=%s\n' "$os_pretty"
   printf 'kernel=%s\n' "$kernel_value"

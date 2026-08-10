@@ -152,10 +152,14 @@ mkdir -p "$build_dir"
 
 revision=$(revision_of "$source_dir")
 executable="$build_dir/couplings/ibamr/ibamr_eel2d_smoke"
+runtime_library="$build_dir/lib/libsmarties.so"
 build_manifest="$build_dir/couplings/ibamr/build_manifest.txt"
 [[ $revision != unknown ]] || die "cannot determine source revision: $source_dir"
 [[ -x "$executable" ]] || die "build did not produce executable: $executable"
+[[ -f "$runtime_library" ]] ||
+  die "build did not produce runtime library: $runtime_library"
 executable_sha256=$(sha256sum "$executable" | awk '{print $1}')
+runtime_library_sha256=$(sha256sum "$runtime_library" | awk '{print $1}')
 patch_marker="$ibamr_overlay/PATCHED_SMARTIES_SAMRAI.sha256"
 [[ -f "$patch_marker" ]] || die "SAMRAI patch marker is missing: $patch_marker"
 samrai_patch_sha256=$(<"$patch_marker")
@@ -168,6 +172,8 @@ manifest_tmp="$build_manifest.tmp.$$"
   printf 'source=%s\n' "$source_dir"
   printf 'executable=%s\n' "$executable"
   printf 'executable_sha256=%s\n' "$executable_sha256"
+  printf 'runtime_library=%s\n' "$runtime_library"
+  printf 'runtime_library_sha256=%s\n' "$runtime_library_sha256"
   printf 'ibamr_root=%s\n' "$IBAMR_ROOT"
   printf 'ibamr_version=0.18.0\n'
   printf 'petsc_root=%s\n' "$petsc_root"
@@ -179,3 +185,5 @@ mv "$manifest_tmp" "$build_manifest"
 printf 'BUILD_MANIFEST=%s\n' "$build_manifest"
 printf 'BUILD_REVISION=%s\n' "$revision"
 printf 'EXECUTABLE_SHA256=%s\n' "$executable_sha256"
+printf 'RUNTIME_LIBRARY=%s\n' "$runtime_library"
+printf 'RUNTIME_LIBRARY_SHA256=%s\n' "$runtime_library_sha256"

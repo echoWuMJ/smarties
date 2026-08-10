@@ -236,22 +236,15 @@ if(BUILD_IBAMR_COUPLING)
 
   add_test(
     NAME eel_smoke_failure_after_mpi
-    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 3
-            ${MPIEXEC_PREFLAGS} $<TARGET_FILE:eel_smoke_protocol>
-            --nMasters 1
-            --nThreads 1
-            --nEnvironments 1
-            --workerProcessesPerEnv 2
-            --learnersOnWorkers 0
-            --nTrainSteps 0
-            --restart none
-            --setupFolder .
-            --input-file input2d
-            --smoke-steps 1
-            --fault-after-initialize
-            ${MPIEXEC_POSTFLAGS})
+    COMMAND "${CMAKE_COMMAND}"
+      "-DTEST_EXECUTABLE=$<TARGET_FILE:eel_smoke_protocol>"
+      "-DMPIEXEC_EXECUTABLE=${MPIEXEC_EXECUTABLE}"
+      "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+      "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
+      "-DMPIEXEC_POSTFLAGS=${MPIEXEC_POSTFLAGS}"
+      "-DINPUT_FILE=${EEL_ENVIRONMENT_RUN_DIR}/input2d"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_eel_smoke_failure_after_mpi.cmake")
   set_tests_properties(eel_smoke_failure_after_mpi PROPERTIES
     WORKING_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}"
-    TIMEOUT 300
-    WILL_FAIL TRUE)
+    TIMEOUT 300)
 endif()

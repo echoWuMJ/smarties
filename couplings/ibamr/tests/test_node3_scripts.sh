@@ -213,7 +213,8 @@ mkdir -p "$fixture_source/couplings/ibamr/configs/fidelity" \
   "$fixture_source/couplings/ibamr/configs/tasks" \
   "$fixture_source/couplings/ibamr/scripts" \
   "$fixture_source/couplings/ibamr/cases/eel2d/upstream" \
-  "$fixture_build/couplings/ibamr"
+  "$fixture_build/couplings/ibamr" \
+  "$fixture_build/lib"
 printf 'cmake_minimum_required(VERSION 3.5)\n' >"$fixture_source/CMakeLists.txt"
 printf 'fixture fidelity\n' >"$fixture_source/couplings/ibamr/configs/fidelity/medium.conf"
 printf '{}\n' >"$fixture_source/couplings/ibamr/configs/training/smoke.json"
@@ -228,13 +229,19 @@ cat >"$fixture_build/couplings/ibamr/ibamr_eel2d_smoke" <<'EOF'
 printf 'fixture coupling completed\n'
 EOF
 chmod +x "$fixture_build/couplings/ibamr/ibamr_eel2d_smoke"
+printf 'fixture smarties runtime library\n' > \
+  "$fixture_build/lib/libsmarties.so"
 fixture_executable_sha=$(sha256sum \
   "$fixture_build/couplings/ibamr/ibamr_eel2d_smoke" | awk '{print $1}')
+fixture_runtime_library_sha=$(sha256sum \
+  "$fixture_build/lib/libsmarties.so" | awk '{print $1}')
 cat >"$fixture_build/couplings/ibamr/build_manifest.txt" <<EOF
 revision=0123456789ab
 source=$fixture_source
 executable_sha256=$fixture_executable_sha
 executable=$fixture_build/couplings/ibamr/ibamr_eel2d_smoke
+runtime_library=$fixture_build/lib/libsmarties.so
+runtime_library_sha256=$fixture_runtime_library_sha
 ibamr_root=/fixture/IBAMR-0.18.0
 ibamr_version=0.18.0
 petsc_root=/fixture/petsc-3.23.3
@@ -255,18 +262,23 @@ while (($#)); do
   esac
 done
 executable="$build_dir/couplings/ibamr/ibamr_eel2d_smoke"
-mkdir -p "$(dirname "$executable")"
+runtime_library="$build_dir/lib/libsmarties.so"
+mkdir -p "$(dirname "$executable")" "$(dirname "$runtime_library")"
 cat >"$executable" <<'PROGRAM'
 #!/usr/bin/env bash
 printf 'fixture coupling rebuilt and completed\n'
 PROGRAM
 chmod +x "$executable"
+printf 'fixture smarties runtime library rebuilt\n' >"$runtime_library"
 executable_sha=$(sha256sum "$executable" | awk '{print $1}')
+runtime_library_sha=$(sha256sum "$runtime_library" | awk '{print $1}')
 cat >"$build_dir/couplings/ibamr/build_manifest.txt" <<MANIFEST
 revision=0123456789ab
 source=$source_dir
 executable_sha256=$executable_sha
 executable=$executable
+runtime_library=$runtime_library
+runtime_library_sha256=$runtime_library_sha
 ibamr_root=/fixture/IBAMR-0.18.0
 ibamr_version=0.18.0
 petsc_root=/fixture/petsc-3.23.3
@@ -290,6 +302,12 @@ assert_contains "$(<"$real_run_dir/manifest.txt")" \
   "build_revision=0123456789ab"
 assert_contains "$(<"$real_run_dir/manifest.txt")" \
   "executable_sha256=$fixture_executable_sha"
+assert_contains "$(<"$real_run_dir/manifest.txt")" \
+  "runtime_library=$fixture_build/lib/libsmarties.so"
+assert_contains "$(<"$real_run_dir/manifest.txt")" \
+  "runtime_library_sha256=$fixture_runtime_library_sha"
+[[ ! -e "$fixture_build/rebuild-called.txt" ]] ||
+  fail "valid cached runtime library unexpectedly triggered rebuild"
 assert_contains "$(<"$real_run_dir/manifest.txt")" \
   "mpi_version=Open MPI fixture 5.0.9"
 assert_contains "$(<"$real_run_dir/manifest.txt")" \
@@ -325,6 +343,55 @@ assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
   "control_stage=stage2_physical_control_experimental"
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
   "--task-file task.conf"
+
+rm "$fixture_build/lib/libsmarties.so"
+output=$(bash "$run_script" smoke --source "$fixture_source" \
+  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity medium \
+  --training couplings/ibamr/configs/training/smoke.json --smoke-steps 1)
+assert_contains "$output" "fixture coupling rebuilt and completed"
+[[ -f "$fixture_build/rebuild-called.txt" ]] ||
+  fail "missing runtime library did not trigger build_node3.sh"
+corrected_runtime_library_sha=$(sha256sum \
+  "$fixture_build/lib/libsmarties.so" | awk '{print $1}')
+assert_contains "$(<"$fixture_build/couplings/ibamr/build_manifest.txt")" \
+  "runtime_library=$fixture_build/lib/libsmarties.so"
+assert_contains "$(<"$fixture_build/couplings/ibamr/build_manifest.txt")" \
+  "runtime_library_sha256=$corrected_runtime_library_sha"
+
+rm "$fixture_build/rebuild-called.txt"
+printf 'tampered runtime library\n' >>"$fixture_build/lib/libsmarties.so"
+output=$(bash "$run_script" smoke --source "$fixture_source" \
+  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity medium \
+  --training couplings/ibamr/configs/training/smoke.json --smoke-steps 1)
+[[ -f "$fixture_build/rebuild-called.txt" ]] ||
+  fail "tampered runtime library did not trigger build_node3.sh"
+assert_contains "$output" "fixture coupling rebuilt and completed"
+
+rm "$fixture_build/rebuild-called.txt"
+sed -i \
+  's/^runtime_library_sha256=.*/runtime_library_sha256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/' \
+  "$fixture_build/couplings/ibamr/build_manifest.txt"
+output=$(bash "$run_script" smoke --source "$fixture_source" \
+  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity medium \
+  --training couplings/ibamr/configs/training/smoke.json --smoke-steps 1)
+[[ -f "$fixture_build/rebuild-called.txt" ]] ||
+  fail "runtime library hash mismatch did not trigger build_node3.sh"
+corrected_runtime_library_sha=$(sha256sum \
+  "$fixture_build/lib/libsmarties.so" | awk '{print $1}')
+assert_contains "$(<"$fixture_build/couplings/ibamr/build_manifest.txt")" \
+  "runtime_library_sha256=$corrected_runtime_library_sha"
+
+rm "$fixture_build/rebuild-called.txt"
+sed -i \
+  's#^runtime_library=.*#runtime_library=/fixture/wrong/libsmarties.so#' \
+  "$fixture_build/couplings/ibamr/build_manifest.txt"
+output=$(bash "$run_script" smoke --source "$fixture_source" \
+  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity medium \
+  --training couplings/ibamr/configs/training/smoke.json --smoke-steps 1)
+[[ -f "$fixture_build/rebuild-called.txt" ]] ||
+  fail "wrong runtime library path did not trigger build_node3.sh"
+assert_contains "$(<"$fixture_build/couplings/ibamr/build_manifest.txt")" \
+  "runtime_library=$fixture_build/lib/libsmarties.so"
 
 sed -i 's/revision=0123456789ab/revision=deadbeefdead/' \
   "$fixture_build/couplings/ibamr/build_manifest.txt"

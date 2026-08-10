@@ -47,9 +47,10 @@ caller-supplied communicator. To prepare the overlay explicitly, run:
 ./couplings/ibamr/scripts/prepare_node3_ibamr.sh
 ```
 
-The overlay is content-guarded by the SHA-256 of
-`patches/ibsamrai2-subcommunicator.patch`; a stale or partial overlay is not
-silently reused.
+Overlay reuse is guarded by two checks: `PATCHED_SMARTIES_SAMRAI.sha256` must
+match the SHA-256 of `patches/ibsamrai2-subcommunicator.patch`, and the required
+`IBAMRConfig.cmake` must exist. These checks do not hash the installed SAMRAI
+or IBAMR libraries and therefore do not authenticate every overlay file.
 
 Create the snapshot locally with:
 
@@ -95,10 +96,12 @@ manifest. Use `--dry-run` to validate the environment and print the command
 without creating a run directory.
 
 The build writes `couplings/ibamr/build_manifest.txt` inside the selected build
-directory. A real run verifies its source revision, source path, and executable
-SHA-256. If the executable is missing, stale, or changed, `run_node3.sh`
-automatically invokes the matching snapshot's `build_node3.sh` before MPI is
-started. The run manifest records both source and verified build identities.
+directory. A real run verifies its source revision and source path plus the
+paths and SHA-256 identities of both the executable and build-tree
+`lib/libsmarties.so`. If either runtime artifact is missing, stale, path
+substituted, or changed, `run_node3.sh` automatically invokes the matching
+snapshot's `build_node3.sh` before MPI is started. The run manifest records
+both source and verified executable/library build identities.
 It also records the host, OS/kernel, compiler and MPI wrapper identities,
 IBAMR/PETSc roots and versions, and the isolated SAMRAI overlay patch hash.
 
