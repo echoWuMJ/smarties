@@ -8,6 +8,7 @@ target_link_libraries(ibamr_coupling_core PUBLIC MPI::MPI_CXX libsmarties)
 
 add_library(ibamr_eel_control STATIC
   cases/eel2d/TailBeatPhase.cpp
+  cases/eel2d/EelLayoutInvariant.cpp
   cases/eel2d/EelControlTask.cpp)
 target_include_directories(ibamr_eel_control PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/cases/eel2d)
