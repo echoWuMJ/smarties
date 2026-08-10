@@ -48,6 +48,12 @@ if(BUILD_IBAMR_COUPLING)
   target_link_libraries(ibamr_eel2d_smoke PRIVATE
     ibamr_coupling_core
     ibamr_eel2d_adapter)
+
+  add_executable(frequency_response_probe
+    cases/eel2d/frequency_response_probe.cpp)
+  target_link_libraries(frequency_response_probe PRIVATE
+    ibamr_coupling_core
+    ibamr_eel2d_environment)
 endif()
 
 if(BUILD_IBAMR_COUPLING_TESTS)
