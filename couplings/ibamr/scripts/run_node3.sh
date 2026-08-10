@@ -18,7 +18,7 @@ Smoke options:
   --envs N                 Concurrent IBAMR environments (default: 1)
   --ranks-per-env N        MPI ranks used by each environment (default: 1)
   --learner-ranks N        Smarties master/learner ranks (default: 1)
-  --fidelity LEVEL         coarse, medium, fine, or curriculum (default: coarse)
+  --fidelity LEVEL         medium only (default: medium)
   --training FILE          Smarties JSON settings file
   --smoke-steps N          IBAMR steps in the lifecycle episode (default: 1)
   --fault-after-initialize Test-only coordinated failure after IBAMR starts
@@ -143,7 +143,7 @@ fi
 envs=1
 ranks_per_env=1
 learner_ranks=1
-fidelity=coarse
+fidelity=medium
 smoke_steps=1
 train_steps=1
 task=
@@ -213,10 +213,9 @@ if [[ $mode == train ]]; then
     die "--train-steps must be a positive integer"
   [[ -n $task ]] || die "--task is required for train mode"
 fi
-case $fidelity in
-  coarse|medium|fine|curriculum) ;;
-  *) die "--fidelity must be coarse, medium, fine, or curriculum" ;;
-esac
+if [[ $fidelity != medium ]]; then
+  die "only medium is supported for physical eel2d runs"
+fi
 
 [[ -f "$source_dir/CMakeLists.txt" ]] ||
   die "source directory does not contain CMakeLists.txt: $source_dir"
@@ -378,12 +377,6 @@ if ((fault_after_initialize)); then
   launch_args+=(--fault-after-initialize)
 fi
 
-if [[ $fidelity == curriculum ]]; then
-  launch_args+=(
-    --appSettings "app-coarse.args,app-medium.args,app-fine.args"
-    --nStepPappSett "1,1,0"
-  )
-fi
 command=(mpiexec -n "$mpi_ranks" "$executable" "${launch_args[@]}")
 
 printf 'SOURCE=%s\n' "$source_dir"
@@ -419,21 +412,7 @@ render_fidelity()
   cmake -D"FIDELITY_FILE=$config" -D"OUTPUT_FILE=$output" -P "$render_script"
 }
 
-if [[ $fidelity == curriculum ]]; then
-  for level in coarse medium fine; do
-    render_fidelity "$level" "$run_dir/input2d.$level"
-    if [[ $mode == smoke ]]; then
-      printf '%s\n' "--input-file input2d.$level --eel-mode smoke --smoke-steps $smoke_steps" \
-        >"$run_dir/app-$level.args"
-    else
-      printf '%s\n' "--input-file input2d.$level --eel-mode speed-tracking --task-file task.conf" \
-        >"$run_dir/app-$level.args"
-    fi
-  done
-  cp "$run_dir/input2d.coarse" "$run_dir/input2d"
-else
-  render_fidelity "$fidelity" "$run_dir/input2d"
-fi
+render_fidelity "$fidelity" "$run_dir/input2d"
 cp "$vertex_file" "$run_dir/eel2d.vertex"
 cp "$training" "$run_dir/settings.json"
 if [[ $mode == train ]]; then

@@ -114,13 +114,14 @@ assert_contains "$output" 'OVERLAY_STATUS=would-build'
 assert_contains "$output" "IBAMR_ROOT=$fixture_root/overlay/packages/IBAMR-0.18.0"
 
 output=$(bash "$run_script" smoke --dry-run --envs 1 --ranks-per-env 1 \
-  --fidelity coarse --training couplings/ibamr/configs/training/smoke.json \
+  --training couplings/ibamr/configs/training/smoke.json \
   --smoke-steps 1)
 assert_contains "$output" "ENVIRONMENT_RANKS=1"
 assert_contains "$output" "MPI_RANKS=2"
 assert_contains "$output" "--learnersOnWorkers 0"
 assert_contains "$output" "--eel-mode smoke"
 assert_contains "$output" "--smoke-steps 1"
+assert_contains "$output" "FIDELITY=medium"
 
 output=$(bash "$run_script" smoke --dry-run --envs 2 --ranks-per-env 2 \
   --fidelity medium --training couplings/ibamr/configs/training/smoke.json \
@@ -128,19 +129,28 @@ output=$(bash "$run_script" smoke --dry-run --envs 2 --ranks-per-env 2 \
 assert_contains "$output" "ENVIRONMENT_RANKS=4"
 assert_contains "$output" "MPI_RANKS=5"
 
-output=$(bash "$run_script" smoke --dry-run --envs 1 --ranks-per-env 1 \
-  --fidelity curriculum \
-  --training couplings/ibamr/configs/training/smoke.json --smoke-steps 1)
-assert_contains "$output" 'app-coarse.args\,app-medium.args\,app-fine.args'
-assert_contains "$output" '1\,1\,0'
+for invalid_fidelity in coarse fine curriculum; do
+  log="$fixture_root/fidelity-${invalid_fidelity}.log"
+  if capture_status "$log" \
+    bash "$run_script" smoke --dry-run \
+      --envs 1 --ranks-per-env 1 \
+      --fidelity "$invalid_fidelity" \
+      --training couplings/ibamr/configs/training/smoke.json \
+      --smoke-steps 1; then
+    fail "unsupported fidelity $invalid_fidelity was accepted"
+  fi
+  assert_contains "$(<"$log")" \
+    "only medium is supported for physical eel2d runs"
+  assert_not_contains "$(<"$log")" "COMMAND="
+done
 
 output=$(bash "$run_script" smoke --dry-run --envs 1 --ranks-per-env 2 \
-  --fidelity coarse --fault-after-initialize \
+  --fidelity medium --fault-after-initialize \
   --training couplings/ibamr/configs/training/smoke.json --smoke-steps 1)
 assert_contains "$output" "--fault-after-initialize"
 
 output=$(bash "$run_script" train --dry-run --envs 2 --ranks-per-env 2 \
-  --fidelity coarse \
+  --fidelity medium \
   --training couplings/ibamr/configs/training/speed_tracking.json \
   --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf \
   --train-steps 1)
@@ -153,7 +163,7 @@ assert_contains "$output" "--nTrainSteps 1"
 
 if capture_status "$fixture_root/train-missing-task.log" \
   bash "$run_script" train --dry-run --envs 1 --ranks-per-env 1 \
-  --fidelity coarse \
+  --fidelity medium \
   --training couplings/ibamr/configs/training/speed_tracking.json \
   --train-steps 1; then
   fail "train accepted a missing --task option"
@@ -165,7 +175,7 @@ assert_not_contains "$(<"$fixture_root/train-missing-task.log")" "COMMAND="
 printf 'this is not key value syntax\n' >"$fixture_root/malformed-task.conf"
 if capture_status "$fixture_root/train-malformed-task.log" \
   bash "$run_script" train --dry-run --envs 1 --ranks-per-env 1 \
-  --fidelity coarse \
+  --fidelity medium \
   --training couplings/ibamr/configs/training/speed_tracking.json \
   --task "$fixture_root/malformed-task.conf" --train-steps 1; then
   fail "train accepted a malformed task file"
@@ -176,7 +186,7 @@ assert_not_contains "$(<"$fixture_root/train-malformed-task.log")" "COMMAND="
 
 if capture_status "$fixture_root/train-steps-zero.log" \
   bash "$run_script" train --dry-run --envs 1 --ranks-per-env 1 \
-  --fidelity coarse \
+  --fidelity medium \
   --training couplings/ibamr/configs/training/speed_tracking.json \
   --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf \
   --train-steps 0; then
@@ -187,7 +197,7 @@ assert_contains "$(<"$fixture_root/train-steps-zero.log")" \
 
 if capture_status "$fixture_root/train-steps-unreachable.log" \
   bash "$run_script" train --dry-run --envs 1 --ranks-per-env 1 \
-  --fidelity coarse \
+  --fidelity medium \
   --training couplings/ibamr/configs/training/speed_tracking.json \
   --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf \
   --train-steps 2; then
@@ -205,7 +215,7 @@ mkdir -p "$fixture_source/couplings/ibamr/configs/fidelity" \
   "$fixture_source/couplings/ibamr/cases/eel2d/upstream" \
   "$fixture_build/couplings/ibamr"
 printf 'cmake_minimum_required(VERSION 3.5)\n' >"$fixture_source/CMakeLists.txt"
-printf 'fixture fidelity\n' >"$fixture_source/couplings/ibamr/configs/fidelity/coarse.conf"
+printf 'fixture fidelity\n' >"$fixture_source/couplings/ibamr/configs/fidelity/medium.conf"
 printf '{}\n' >"$fixture_source/couplings/ibamr/configs/training/smoke.json"
 cp "$speed_settings" \
   "$fixture_source/couplings/ibamr/configs/training/speed_tracking.json"
@@ -269,7 +279,7 @@ EOF
 chmod +x "$fixture_source/couplings/ibamr/scripts/build_node3.sh"
 
 output=$(bash "$run_script" smoke --source "$fixture_source" \
-  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity coarse \
+  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity medium \
   --training couplings/ibamr/configs/training/smoke.json --smoke-steps 1)
 assert_contains "$output" "fixture coupling completed"
 real_run_dir=$(printf '%s\n' "$output" | sed -n 's/^RUN_DIRECTORY=//p')
@@ -293,7 +303,7 @@ assert_contains "$(<"$real_run_dir/manifest.txt")" "state_dimension=1"
 assert_contains "$(<"$real_run_dir/manifest.txt")" "action_dimension=1"
 
 output=$(bash "$run_script" train --source "$fixture_source" \
-  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity coarse \
+  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity medium \
   --training couplings/ibamr/configs/training/speed_tracking.json \
   --task couplings/ibamr/configs/tasks/task.conf --train-steps 1)
 assert_contains "$output" "fixture coupling completed"
@@ -319,7 +329,7 @@ assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
 sed -i 's/revision=0123456789ab/revision=deadbeefdead/' \
   "$fixture_build/couplings/ibamr/build_manifest.txt"
 output=$(bash "$run_script" smoke --source "$fixture_source" \
-  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity coarse \
+  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity medium \
   --training couplings/ibamr/configs/training/smoke.json --smoke-steps 1)
 assert_contains "$output" "fixture coupling rebuilt and completed"
 [[ -f "$fixture_build/rebuild-called.txt" ]] ||
@@ -330,7 +340,7 @@ assert_contains "$(<"$fixture_build/couplings/ibamr/build_manifest.txt")" \
 rm "$fixture_build/rebuild-called.txt"
 printf '# tampered\n' >>"$fixture_build/couplings/ibamr/ibamr_eel2d_smoke"
 output=$(bash "$run_script" smoke --source "$fixture_source" \
-  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity coarse \
+  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity medium \
   --training couplings/ibamr/configs/training/smoke.json --smoke-steps 1)
 assert_contains "$output" "fixture coupling rebuilt and completed"
 [[ -f "$fixture_build/rebuild-called.txt" ]] ||

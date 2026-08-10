@@ -76,7 +76,7 @@ From the source snapshot:
 ./couplings/ibamr/scripts/run_node3.sh smoke \
   --envs 1 \
   --ranks-per-env 1 \
-  --fidelity coarse \
+  --fidelity medium \
   --training couplings/ibamr/configs/training/smoke.json \
   --smoke-steps 1
 ```
@@ -87,11 +87,12 @@ The launcher derives total MPI ranks as:
 learner ranks + environments * ranks per environment
 ```
 
-`--fidelity` accepts `coarse`, `medium`, `fine`, or `curriculum`. Each real run
-gets a unique directory below `couplings/ibamr/runs/` containing the rendered
-input, copied settings, stdout log, exit code, and a revision/hash manifest.
-Use `--dry-run` to validate the environment and print the command without
-creating a run directory.
+`--fidelity` accepts only `medium` (and defaults to it). `coarse`, `fine`, and
+`curriculum` are intentionally rejected before any build or MPI launch. Each
+real run gets a unique directory below `couplings/ibamr/runs/` containing the
+rendered input, copied settings, stdout log, exit code, and a revision/hash
+manifest. Use `--dry-run` to validate the environment and print the command
+without creating a run directory.
 
 The build writes `couplings/ibamr/build_manifest.txt` inside the selected build
 directory. A real run verifies its source revision, source path, and executable
@@ -107,15 +108,16 @@ the environment communicator is aborted without any private `MPI_Finalize`.
 
 ## Experimental frequency-control run
 
-Use an explicitly calibrated task file for scientific runs. The committed
+Frequency-control runs require an explicitly provided task file. The committed
 example and protocol-test files contain placeholders or synthetic values and
-must not be treated as node3 calibration evidence.
+must not be treated as node3 calibration evidence. No calibrated medium task
+configuration has been admitted.
 
 ```bash
 ./couplings/ibamr/scripts/run_node3.sh train \
   --envs 1 \
   --ranks-per-env 1 \
-  --fidelity coarse \
+  --fidelity medium \
   --training couplings/ibamr/configs/training/speed_tracking.json \
   --task /absolute/or/repository/relative/task.conf \
   --train-steps 1
@@ -140,22 +142,14 @@ The adapter uses those actual values for interval-averaged velocity and logs
 tracking, frequency-regularization, and smoothness reward terms separately.
 The frequency penalty is not a physical energy or efficiency measurement.
 
-### Calibrated node3 coarse task
+### Calibration status
 
-`configs/tasks/speed_tracking_node3_coarse.conf` is the admission configuration
-for the official eel2d case at node3 coarse fidelity. A baseline-ratio run from
-source revision `6b2faccc03f08c7a13edfa7e22f570d0ed54b2ff` advanced 10008 native
-IBAMR steps over 1.0008 simulation-time units and measured global COM
-displacement `(-0.11510557, 0.01536821)`. This gives the measured forward unit
-direction `(-0.99120442, 0.13233973)`.
-
-After the first four control intervals, interval-averaged speeds along that
-direction ranged from 0.12050 to 0.13337. The configured target 0.125 is a
-rounded conservative value inside that observed range, and `velocity_scale`
-uses the same value so nominal observations are order one. One baseline cycle
-is used as warm-up before a 16-decision episode. These values are specific to
-this host, fidelity, case, and calibration revision; they are admission inputs,
-not a claim of physical or control optimality.
+The former coarse calibration and its task configuration were retracted after
+the coarse layout was found invalid. The investigation is retained solely as
+invalid evidence in the non-versioned artifact path
+[`../../.artifacts/ibamr-smarties-investigations/coarse-lagrangian-collapse/investigation.md`](../../.artifacts/ibamr-smarties-investigations/coarse-lagrangian-collapse/investigation.md).
+It is not an admission input, and it does not establish a target speed or
+forward direction for medium fidelity.
 
 The `train` path remains experimental until one immutable revision passes the
 full node3 topology, repeated-run, failure-injection, process-cleanup, and
