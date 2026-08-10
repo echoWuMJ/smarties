@@ -13,10 +13,29 @@ namespace ibamr_smarties
 namespace eel2d
 {
 
+enum class EelMode
+{
+  smoke,
+  speed_tracking
+};
+
+EelMode parseEelMode(int argc, char** argv);
+
 struct SmokeProtocolReport
 {
   unsigned completed_steps;
   bool terminal_sent;
+};
+
+struct ControlProtocolReport
+{
+  unsigned completed_decisions;
+  unsigned completed_ibamr_steps;
+  unsigned clipped_actions;
+  bool terminal_sent;
+  bool finite_state_and_reward;
+  unsigned state_dimension;
+  unsigned action_dimension;
 };
 
 void runSmokeEpisode(smarties::Communicator* const comm,
@@ -24,7 +43,13 @@ void runSmokeEpisode(smarties::Communicator* const comm,
                      int argc,
                      char** argv);
 
+void runSpeedTrackingEpisode(smarties::Communicator* const comm,
+                             MPI_Comm environment_comm,
+                             int argc,
+                             char** argv);
+
 SmokeProtocolReport lastSmokeProtocolReport();
+ControlProtocolReport lastControlProtocolReport();
 
 } // namespace eel2d
 } // namespace ibamr_smarties
