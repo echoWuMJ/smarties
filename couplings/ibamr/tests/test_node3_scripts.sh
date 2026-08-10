@@ -6,6 +6,7 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 build_script="$repo_root/couplings/ibamr/scripts/build_node3.sh"
 prepare_script="$repo_root/couplings/ibamr/scripts/prepare_node3_ibamr.sh"
 run_script="$repo_root/couplings/ibamr/scripts/run_node3.sh"
+speed_settings="$repo_root/couplings/ibamr/configs/training/speed_tracking.json"
 fixture_root=$(mktemp -d)
 trap 'rm -rf "$fixture_root"' EXIT
 
@@ -73,6 +74,13 @@ assert_contains()
     fail "expected output to contain '$expected', got: $output"
 }
 
+assert_not_contains()
+{
+  local output=$1 unexpected=$2
+  [[ "$output" != *"$unexpected"* ]] ||
+    fail "expected output not to contain '$unexpected', got: $output"
+}
+
 capture_status()
 {
   local output_file=$1
@@ -83,6 +91,15 @@ capture_status()
   set -e
   return "$status"
 }
+
+min_training_observations=$(sed -n \
+  's/.*"minTotObsNum"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+  "$speed_settings")
+[[ "$min_training_observations" == 1 ]] ||
+  fail "speed-tracking learner must leave one post-startup protocol transition"
+if grep -Eiq 'pytorch|cuda' "$speed_settings"; then
+  fail "speed-tracking baseline unexpectedly enables PyTorch/CUDA"
+fi
 
 mkdir -p "$fixture_root/base/tmp/unpack/IBSAMRAI2-2025.10.29" \
   "$fixture_root/base/tmp/unpack/IBAMR-0.18.0"
@@ -102,6 +119,8 @@ output=$(bash "$run_script" smoke --dry-run --envs 1 --ranks-per-env 1 \
 assert_contains "$output" "ENVIRONMENT_RANKS=1"
 assert_contains "$output" "MPI_RANKS=2"
 assert_contains "$output" "--learnersOnWorkers 0"
+assert_contains "$output" "--eel-mode smoke"
+assert_contains "$output" "--smoke-steps 1"
 
 output=$(bash "$run_script" smoke --dry-run --envs 2 --ranks-per-env 2 \
   --fidelity medium --training couplings/ibamr/configs/training/smoke.json \
@@ -120,16 +139,78 @@ output=$(bash "$run_script" smoke --dry-run --envs 1 --ranks-per-env 2 \
   --training couplings/ibamr/configs/training/smoke.json --smoke-steps 1)
 assert_contains "$output" "--fault-after-initialize"
 
+output=$(bash "$run_script" train --dry-run --envs 2 --ranks-per-env 2 \
+  --fidelity coarse \
+  --training couplings/ibamr/configs/training/speed_tracking.json \
+  --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf \
+  --train-steps 1)
+assert_contains "$output" "ENVIRONMENT_RANKS=4"
+assert_contains "$output" "MPI_RANKS=5"
+assert_contains "$output" "CONTROL_STAGE=stage2_physical_control_experimental"
+assert_contains "$output" "--eel-mode speed-tracking"
+assert_contains "$output" "--task-file task.conf"
+assert_contains "$output" "--nTrainSteps 1"
+
+if capture_status "$fixture_root/train-missing-task.log" \
+  bash "$run_script" train --dry-run --envs 1 --ranks-per-env 1 \
+  --fidelity coarse \
+  --training couplings/ibamr/configs/training/speed_tracking.json \
+  --train-steps 1; then
+  fail "train accepted a missing --task option"
+fi
+assert_contains "$(<"$fixture_root/train-missing-task.log")" \
+  "--task is required"
+assert_not_contains "$(<"$fixture_root/train-missing-task.log")" "COMMAND="
+
+printf 'this is not key value syntax\n' >"$fixture_root/malformed-task.conf"
+if capture_status "$fixture_root/train-malformed-task.log" \
+  bash "$run_script" train --dry-run --envs 1 --ranks-per-env 1 \
+  --fidelity coarse \
+  --training couplings/ibamr/configs/training/speed_tracking.json \
+  --task "$fixture_root/malformed-task.conf" --train-steps 1; then
+  fail "train accepted a malformed task file"
+fi
+assert_contains "$(<"$fixture_root/train-malformed-task.log")" \
+  "invalid task configuration"
+assert_not_contains "$(<"$fixture_root/train-malformed-task.log")" "COMMAND="
+
+if capture_status "$fixture_root/train-steps-zero.log" \
+  bash "$run_script" train --dry-run --envs 1 --ranks-per-env 1 \
+  --fidelity coarse \
+  --training couplings/ibamr/configs/training/speed_tracking.json \
+  --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf \
+  --train-steps 0; then
+  fail "train accepted --train-steps 0"
+fi
+assert_contains "$(<"$fixture_root/train-steps-zero.log")" \
+  "--train-steps must be a positive integer"
+
+if capture_status "$fixture_root/train-steps-unreachable.log" \
+  bash "$run_script" train --dry-run --envs 1 --ranks-per-env 1 \
+  --fidelity coarse \
+  --training couplings/ibamr/configs/training/speed_tracking.json \
+  --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf \
+  --train-steps 2; then
+  fail "train accepted a step budget unreachable in one physical episode"
+fi
+assert_contains "$(<"$fixture_root/train-steps-unreachable.log")" \
+  "cannot finish within one physical episode"
+
 fixture_source="$fixture_root/smarties-fixture-0123456789ab"
 fixture_build="$fixture_root/build-real"
 mkdir -p "$fixture_source/couplings/ibamr/configs/fidelity" \
   "$fixture_source/couplings/ibamr/configs/training" \
+  "$fixture_source/couplings/ibamr/configs/tasks" \
   "$fixture_source/couplings/ibamr/scripts" \
   "$fixture_source/couplings/ibamr/cases/eel2d/upstream" \
   "$fixture_build/couplings/ibamr"
 printf 'cmake_minimum_required(VERSION 3.5)\n' >"$fixture_source/CMakeLists.txt"
 printf 'fixture fidelity\n' >"$fixture_source/couplings/ibamr/configs/fidelity/coarse.conf"
 printf '{}\n' >"$fixture_source/couplings/ibamr/configs/training/smoke.json"
+cp "$speed_settings" \
+  "$fixture_source/couplings/ibamr/configs/training/speed_tracking.json"
+cp "$repo_root/couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf" \
+  "$fixture_source/couplings/ibamr/configs/tasks/task.conf"
 printf 'fixture renderer\n' >"$fixture_source/couplings/ibamr/scripts/render_input.cmake"
 printf 'fixture vertex\n' >"$fixture_source/couplings/ibamr/cases/eel2d/upstream/eel2d.vertex"
 cat >"$fixture_build/couplings/ibamr/ibamr_eel2d_smoke" <<'EOF'
@@ -143,6 +224,7 @@ cat >"$fixture_build/couplings/ibamr/build_manifest.txt" <<EOF
 revision=0123456789ab
 source=$fixture_source
 executable_sha256=$fixture_executable_sha
+executable=$fixture_build/couplings/ibamr/ibamr_eel2d_smoke
 ibamr_root=/fixture/IBAMR-0.18.0
 ibamr_version=0.18.0
 petsc_root=/fixture/petsc-3.23.3
@@ -174,6 +256,7 @@ cat >"$build_dir/couplings/ibamr/build_manifest.txt" <<MANIFEST
 revision=0123456789ab
 source=$source_dir
 executable_sha256=$executable_sha
+executable=$executable
 ibamr_root=/fixture/IBAMR-0.18.0
 ibamr_version=0.18.0
 petsc_root=/fixture/petsc-3.23.3
@@ -205,6 +288,33 @@ assert_contains "$(<"$real_run_dir/manifest.txt")" \
   "petsc_version=3.23.3"
 assert_contains "$(<"$real_run_dir/manifest.txt")" \
   "samrai_patch_sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+assert_contains "$(<"$real_run_dir/manifest.txt")" "eel_mode=smoke"
+assert_contains "$(<"$real_run_dir/manifest.txt")" "state_dimension=1"
+assert_contains "$(<"$real_run_dir/manifest.txt")" "action_dimension=1"
+
+output=$(bash "$run_script" train --source "$fixture_source" \
+  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity coarse \
+  --training couplings/ibamr/configs/training/speed_tracking.json \
+  --task couplings/ibamr/configs/tasks/task.conf --train-steps 1)
+assert_contains "$output" "fixture coupling completed"
+assert_contains "$output" "CONTROL_STAGE=stage2_physical_control_experimental"
+real_train_run_dir=$(printf '%s\n' "$output" | sed -n 's/^RUN_DIRECTORY=//p')
+[[ -f "$real_train_run_dir/task.conf" ]] ||
+  fail "train task file was not frozen in the run directory"
+train_task_sha=$(sha256sum "$real_train_run_dir/task.conf" | awk '{print $1}')
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
+  "eel_mode=speed-tracking"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
+  "task_file=$real_train_run_dir/task.conf"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
+  "task_sha256=$train_task_sha"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" "train_steps=1"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" "state_dimension=5"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" "action_dimension=1"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
+  "control_stage=stage2_physical_control_experimental"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
+  "--task-file task.conf"
 
 sed -i 's/revision=0123456789ab/revision=deadbeefdead/' \
   "$fixture_build/couplings/ibamr/build_manifest.txt"
@@ -238,13 +348,6 @@ if capture_status "$fixture_root/ranks-zero.log" bash "$run_script" smoke \
 fi
 assert_contains "$(<"$fixture_root/ranks-zero.log")" \
   "--ranks-per-env must be a positive integer"
-
-set +e
-bash "$run_script" train --dry-run >"$fixture_root/train.log" 2>&1
-status=$?
-set -e
-[[ $status -eq 64 ]] || fail "train returned $status instead of 64"
-assert_contains "$(<"$fixture_root/train.log")" "train mode is not supported"
 
 FIXTURE_GCC_VERSION=8.4.0
 export FIXTURE_GCC_VERSION

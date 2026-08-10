@@ -26,8 +26,13 @@ Smoke options:
   --build DIR              Matching node3 build directory
   --dry-run                Validate and print the derived launch command
 
-The phase-one smoke mode validates process ownership and the communication
-lifecycle. It does not implement a fish control law or meaningful RL reward.
+Train options additionally require:
+  --task FILE              Validated eel control task configuration
+  --train-steps N          Positive post-startup data-step budget (default: 1)
+
+Smoke validates process ownership and the communication lifecycle. Train runs
+the stage-two, one-physical-episode frequency-control path with Smarties' native
+CPU learner; it does not establish policy quality or reset support.
 EOF
 }
 
@@ -83,6 +88,45 @@ manifest_value()
   sed -n "s/^${key}=//p" "$manifest" | tail -n 1
 }
 
+validate_task_config()
+{
+  local task_file=$1
+  awk '
+    BEGIN {
+      split("baseline_angular_frequency minimum_frequency_ratio maximum_frequency_ratio maximum_ratio_delta decisions_per_baseline_period target_forward_speed forward_direction_x forward_direction_y velocity_scale tracking_weight frequency_weight smoothness_weight warmup_cycles episode_decisions", names, " ")
+      for (i in names) required[names[i]] = 1
+      number = "^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?$"
+    }
+    {
+      line = $0
+      sub(/#.*/, "", line)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+      if (line == "") next
+      copy = line
+      if (gsub(/=/, "=", copy) != 1) { invalid = 1; exit }
+      split(line, fields, "=")
+      key = fields[1]
+      value = fields[2]
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      if (!(key in required) || key in seen || value !~ number) {
+        invalid = 1
+        exit
+      }
+      if ((key == "decisions_per_baseline_period" ||
+           key == "episode_decisions") && value !~ /^[1-9][0-9]*$/) {
+        invalid = 1
+        exit
+      }
+      seen[key] = 1
+    }
+    END {
+      if (invalid) exit 1
+      for (key in required) if (!(key in seen)) exit 1
+    }
+  ' "$task_file"
+}
+
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source_dir=$(cd "$script_dir/../../.." && pwd)
 mode=${1:-}
@@ -92,25 +136,36 @@ mode=${1:-}
 }
 shift
 
-if [[ $mode == train ]]; then
-  printf 'run_node3.sh: train mode is not supported until the state, action, reward, and physical control specification is approved\n' >&2
-  exit 64
+if [[ $mode != smoke && $mode != train ]]; then
+  die "mode must be 'smoke' or 'train'" 64
 fi
-[[ $mode == smoke ]] || die "mode must be 'smoke' or 'train'" 64
 
 envs=1
 ranks_per_env=1
 learner_ranks=1
 fidelity=coarse
-training=couplings/ibamr/configs/training/smoke.json
 smoke_steps=1
+train_steps=1
+task=
 build_dir=
 dry_run=0
 fault_after_initialize=0
+if [[ $mode == smoke ]]; then
+  training=couplings/ibamr/configs/training/smoke.json
+  eel_mode=smoke
+  control_stage=phase1_lifecycle_smoke
+  state_dimension=1
+else
+  training=couplings/ibamr/configs/training/speed_tracking.json
+  eel_mode=speed-tracking
+  control_stage=stage2_physical_control_experimental
+  state_dimension=5
+fi
+action_dimension=1
 
 while (($#)); do
   case $1 in
-    --envs|--ranks-per-env|--learner-ranks|--fidelity|--training|--smoke-steps|--source|--build)
+    --envs|--ranks-per-env|--learner-ranks|--fidelity|--training|--smoke-steps|--train-steps|--task|--source|--build)
       (($# >= 2)) || die "missing value after $1"
       option=$1
       value=$2
@@ -121,6 +176,8 @@ while (($#)); do
         --fidelity) fidelity=$value ;;
         --training) training=$value ;;
         --smoke-steps) smoke_steps=$value ;;
+        --train-steps) train_steps=$value ;;
+        --task) task=$value ;;
         --source) source_dir=$value ;;
         --build) build_dir=$value ;;
       esac
@@ -151,6 +208,11 @@ is_positive_integer "$learner_ranks" ||
   die "--learner-ranks must be a positive integer"
 is_positive_integer "$smoke_steps" ||
   die "--smoke-steps must be a positive integer"
+if [[ $mode == train ]]; then
+  is_positive_integer "$train_steps" ||
+    die "--train-steps must be a positive integer"
+  [[ -n $task ]] || die "--task is required for train mode"
+fi
 case $fidelity in
   coarse|medium|fine|curriculum) ;;
   *) die "--fidelity must be coarse, medium, fine, or curriculum" ;;
@@ -166,6 +228,38 @@ if [[ $training != /* ]]; then
   training="$source_dir/$training"
 fi
 [[ -f "$training" ]] || die "training settings not found: $training"
+if [[ $mode == train ]]; then
+  if [[ $task != /* ]]; then
+    task="$source_dir/$task"
+  fi
+  [[ -f "$task" ]] || die "task configuration not found: $task"
+  validate_task_config "$task" ||
+    die "invalid task configuration: $task"
+  minimum_training_observations=$(sed -n \
+    's/.*"minTotObsNum"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+    "$training" | tail -n 1)
+  is_positive_integer "$minimum_training_observations" ||
+    die "training settings require a positive integer minTotObsNum: $training"
+  episode_decisions=$(awk -F= '
+    {
+      line = $0
+      sub(/#.*/, "", line)
+      if (line ~ /^[[:space:]]*episode_decisions[[:space:]]*=/) {
+        value = line
+        sub(/^[^=]*=[[:space:]]*/, "", value)
+        sub(/[[:space:]]*$/, "", value)
+        print value
+      }
+    }
+  ' "$task" | tail -n 1)
+  is_positive_integer "$episode_decisions" ||
+    die "task configuration has invalid episode_decisions: $task"
+  maximum_single_episode_train_steps=$((episode_decisions - minimum_training_observations))
+  if ((maximum_single_episode_train_steps < 1 ||
+       train_steps > maximum_single_episode_train_steps)); then
+    die "--train-steps $train_steps cannot finish within one physical episode (episode_decisions=$episode_decisions, minTotObsNum=$minimum_training_observations)"
+  fi
+fi
 
 environment_ranks=$((envs * ranks_per_env))
 mpi_ranks=$((learner_ranks + environment_ranks))
@@ -185,12 +279,14 @@ preflight
 build_is_current()
 {
   [[ -x "$executable" && -f "$build_manifest" ]] || return 1
-  local recorded_revision recorded_source recorded_sha actual_sha
+  local recorded_revision recorded_source recorded_executable recorded_sha actual_sha
   recorded_revision=$(manifest_value revision "$build_manifest")
   recorded_source=$(manifest_value source "$build_manifest")
   recorded_sha=$(manifest_value executable_sha256 "$build_manifest")
+  recorded_executable=$(manifest_value executable "$build_manifest")
   [[ "$recorded_revision" == "$revision" ]] || return 1
   [[ "$recorded_source" == "$source_dir" ]] || return 1
+  [[ "$recorded_executable" == "$executable" ]] || return 1
   [[ $recorded_sha =~ ^[0-9a-f]{64}$ ]] || return 1
   actual_sha=$(sha256sum "$executable" | awk '{print $1}')
   [[ "$actual_sha" == "$recorded_sha" ]] || return 1
@@ -253,6 +349,11 @@ mpi_version=$(mpiexec --version 2>&1 | sed -n '1p')
 mpicc_command=$(mpicc --showme:command)
 mpicxx_command=$(mpicxx --showme:command)
 env_script_used=${SMARTIES_IBAMR_ENV_SCRIPT:-$DEFAULT_ENV_SCRIPT}
+if [[ $mode == train ]]; then
+  effective_train_steps=$train_steps
+else
+  effective_train_steps=0
+fi
 
 launch_args=(
   --nMasters "$learner_ranks"
@@ -260,12 +361,18 @@ launch_args=(
   --nEnvironments "$envs"
   --workerProcessesPerEnv "$ranks_per_env"
   --learnersOnWorkers 0
-  --nTrainSteps 0
+  --nTrainSteps "$effective_train_steps"
   --restart none
   --setupFolder .
   --input-file input2d
-  --smoke-steps "$smoke_steps"
+  --eel-mode "$eel_mode"
 )
+
+if [[ $mode == smoke ]]; then
+  launch_args+=(--smoke-steps "$smoke_steps")
+else
+  launch_args+=(--task-file task.conf)
+fi
 
 if ((fault_after_initialize)); then
   launch_args+=(--fault-after-initialize)
@@ -287,6 +394,8 @@ printf 'LEARNER_RANKS=%s\n' "$learner_ranks"
 printf 'ENVIRONMENT_RANKS=%s\n' "$environment_ranks"
 printf 'MPI_RANKS=%s\n' "$mpi_ranks"
 printf 'FIDELITY=%s\n' "$fidelity"
+printf 'EEL_MODE=%s\n' "$eel_mode"
+printf 'CONTROL_STAGE=%s\n' "$control_stage"
 printf 'BUILD_STATUS=%s\n' "$build_status"
 printf 'BUILD_REVISION=%s\n' "$build_revision"
 printf 'COMMAND='
@@ -313,8 +422,13 @@ render_fidelity()
 if [[ $fidelity == curriculum ]]; then
   for level in coarse medium fine; do
     render_fidelity "$level" "$run_dir/input2d.$level"
-    printf '%s\n' "--input-file input2d.$level --smoke-steps $smoke_steps" \
-      >"$run_dir/app-$level.args"
+    if [[ $mode == smoke ]]; then
+      printf '%s\n' "--input-file input2d.$level --eel-mode smoke --smoke-steps $smoke_steps" \
+        >"$run_dir/app-$level.args"
+    else
+      printf '%s\n' "--input-file input2d.$level --eel-mode speed-tracking --task-file task.conf" \
+        >"$run_dir/app-$level.args"
+    fi
   done
   cp "$run_dir/input2d.coarse" "$run_dir/input2d"
 else
@@ -322,6 +436,14 @@ else
 fi
 cp "$vertex_file" "$run_dir/eel2d.vertex"
 cp "$training" "$run_dir/settings.json"
+if [[ $mode == train ]]; then
+  cp "$task" "$run_dir/task.conf"
+  task_file_manifest="$run_dir/task.conf"
+  task_sha256=$(sha256sum "$run_dir/task.conf" | awk '{print $1}')
+else
+  task_file_manifest=not-applicable
+  task_sha256=not-applicable
+fi
 
 manifest="$run_dir/manifest.txt"
 {
@@ -333,6 +455,7 @@ manifest="$run_dir/manifest.txt"
   printf 'build_revision=%s\n' "$build_revision"
   printf 'build_manifest_sha256=%s\n' "$build_manifest_sha256"
   printf 'executable_sha256=%s\n' "$executable_sha256"
+  printf 'executable=%s\n' "$executable"
   printf 'hostname=%s\n' "$hostname_value"
   printf 'os=%s\n' "$os_pretty"
   printf 'kernel=%s\n' "$kernel_value"
@@ -352,6 +475,13 @@ manifest="$run_dir/manifest.txt"
   printf 'total_mpi_ranks=%s\n' "$mpi_ranks"
   printf 'fidelity=%s\n' "$fidelity"
   printf 'training=%s\n' "$training"
+  printf 'eel_mode=%s\n' "$eel_mode"
+  printf 'task_file=%s\n' "$task_file_manifest"
+  printf 'task_sha256=%s\n' "$task_sha256"
+  printf 'train_steps=%s\n' "$effective_train_steps"
+  printf 'state_dimension=%s\n' "$state_dimension"
+  printf 'action_dimension=%s\n' "$action_dimension"
+  printf 'control_stage=%s\n' "$control_stage"
   printf 'smoke_steps=%s\n' "$smoke_steps"
   printf 'fault_after_initialize=%s\n' "$fault_after_initialize"
   printf 'gcc_version=%s\n' "$(gcc -dumpfullversion -dumpversion)"

@@ -1,11 +1,14 @@
 # Smarties-IBAMR eel2d coupling
 
-This directory contains the first executable coupling framework for the IBAMR
-0.18.0 `eel2d` example and Smarties. The current executable is deliberately a
-lifecycle probe: it advances the real IBAMR hierarchy, checks a one-dimensional
-Smarties action, sends one terminal transition, and verifies coordinated MPI
-shutdown. It does **not** yet apply the action to the fish or define a meaningful
-state, reward, or training problem.
+This directory contains the executable coupling framework for the IBAMR 0.18.0
+`eel2d` example and Smarties. The original `smoke` mode remains a lifecycle
+probe. The experimental stage-two `train` mode applies one bounded Smarties
+action to the official eel tail-beat frequency, observes a five-component
+target-speed state, and advances multiple native IBAMR steps per decision.
+
+Stage two supports one multi-decision physical episode. It does **not** yet
+reconstruct/reset IBAMR for independent episodes, establish policy quality,
+measure swimming energy/efficiency, or enable PyTorch/CUDA.
 
 ## Fixed process architecture
 
@@ -14,7 +17,7 @@ state, reward, or training problem.
 - Smarties learner ranks and IBAMR environment ranks are separate.
 - Launches always use `--learnersOnWorkers 0`; IBAMR ranks do not host networks.
 - No process is forked after MPI initialization.
-- Phase one uses the native CPU Smarties learner. PyTorch is not enabled.
+- Both modes use the native CPU Smarties learner. PyTorch/CUDA are not enabled.
 
 ## Build on node3
 
@@ -61,7 +64,9 @@ be named explicitly with `-IncludeUntracked`; unrelated untracked work is never
 copied implicitly. `SOURCE_METADATA.txt` records the full Git revision, tracked
 dirty state, allowlisted files, and excluded gitlinks. After extraction,
 `SOURCE_MANIFEST.sha256` validates every packaged source and metadata file from
-the archive root.
+the archive root. Shell scripts are normalized to UTF-8/LF in the package
+staging area so an archive created on Windows remains directly executable on
+node3; the local working tree is not rewritten.
 
 ## One-command smoke run
 
@@ -100,14 +105,51 @@ IBAMR/PETSc roots and versions, and the isolated SAMRAI overlay patch hash.
 initializes the real IBAMR environment, then exercises the fatal callback path;
 the environment communicator is aborted without any private `MPI_Finalize`.
 
-`train` intentionally exits with status 64. It will remain disabled until the
-fish control variable, state vector, reward, time horizon, and safety limits are
-specified and approved.
+## Experimental frequency-control run
+
+Use an explicitly calibrated task file for scientific runs. The committed
+example and protocol-test files contain placeholders or synthetic values and
+must not be treated as node3 calibration evidence.
+
+```bash
+./couplings/ibamr/scripts/run_node3.sh train \
+  --envs 1 \
+  --ranks-per-env 1 \
+  --fidelity coarse \
+  --training couplings/ibamr/configs/training/speed_tracking.json \
+  --task /absolute/or/repository/relative/task.conf \
+  --train-steps 1
+```
+
+The launcher validates the task-file structure before building or launching
+MPI, copies the selected file to the run directory as `task.conf`, and passes
+only that frozen copy to the adapter. The run manifest records its SHA-256,
+the five-state/one-action dimensions, training-step budget, executable path and
+hash, and `control_stage=stage2_physical_control_experimental`.
+
+Smarties counts `nTrainSteps` only after its initial replay-data threshold.
+Because this stage deliberately runs exactly one physical episode, the launcher
+rejects a budget larger than `episode_decisions - minTotObsNum`; such a run
+cannot reach Smarties termination without a reset. The conservative baseline
+uses `minTotObsNum=1` and `--train-steps 1`.
+
+One action in `[-1,1]` requests a configured frequency ratio; clipping and slew
+limits are applied before the command reaches `EelEnvironment`. IBAMR owns the
+inner CFD loop and returns actual start/end times and center-of-mass positions.
+The adapter uses those actual values for interval-averaged velocity and logs
+tracking, frequency-regularization, and smoothness reward terms separately.
+The frequency penalty is not a physical energy or efficiency measurement.
+
+The `train` path remains experimental until one immutable revision passes the
+full node3 topology, repeated-run, failure-injection, process-cleanup, and
+evidence-review admission matrix.
 
 ## Tests
 
 ```bash
 bash couplings/ibamr/tests/test_node3_scripts.sh
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File couplings/ibamr/tests/test_package_local.ps1
 SAMRAI_SOURCE_ROOT=/data2/mjwu/autoibamr-v0.18.0/tmp/unpack/IBSAMRAI2-2025.10.29 \
   bash couplings/ibamr/tests/test_samrai_subcommunicator_patch.sh
 ctest --test-dir /data2/mjwu/local/coupling-build/<snapshot> --output-on-failure

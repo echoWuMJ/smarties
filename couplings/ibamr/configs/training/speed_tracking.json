@@ -1,0 +1,10 @@
+{
+  "learner": "VRACER",
+  "batchSize": 1,
+  "encoderLayerSizes": [0],
+  "maxTotObsNum": 512,
+  "minTotObsNum": 1,
+  "nnLayerSizes": [16, 16],
+  "obsPerStep": 1,
+  "saveFreq": 64
+}

@@ -166,6 +166,7 @@ manifest_tmp="$build_manifest.tmp.$$"
 {
   printf 'revision=%s\n' "$revision"
   printf 'source=%s\n' "$source_dir"
+  printf 'executable=%s\n' "$executable"
   printf 'executable_sha256=%s\n' "$executable_sha256"
   printf 'ibamr_root=%s\n' "$IBAMR_ROOT"
   printf 'ibamr_version=0.18.0\n'

@@ -89,6 +89,17 @@ if ($LASTEXITCODE -ne 0) {
     throw 'archive extraction failed'
 }
 
+foreach ($relativeScript in @(
+    'couplings\ibamr\scripts\build_node3.sh',
+    'couplings\ibamr\scripts\run_node3.sh',
+    'couplings\ibamr\tests\test_node3_scripts.sh'
+)) {
+    $scriptPath = Join-Path $extract $relativeScript
+    if ([IO.File]::ReadAllBytes($scriptPath) -contains 13) {
+        throw "packaged shell script contains CR bytes: $relativeScript"
+    }
+}
+
 $metadata = Get-Content -LiteralPath (Join-Path $extract 'SOURCE_METADATA.txt')
 $fullRevision = (& 'C:\Program Files\Git\cmd\git.exe' -C $repo rev-parse HEAD).Trim()
 if ($metadata -notcontains "revision=$fullRevision") {

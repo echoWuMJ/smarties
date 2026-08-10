@@ -61,6 +61,7 @@ foreach ($candidate in $IncludeUntracked) {
 }
 
 $excludedGitlinks = [System.Collections.Generic.List[string]]::new()
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 foreach ($relative in $files) {
     $source = Join-Path $Repository $relative
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
@@ -76,6 +77,11 @@ foreach ($relative in $files) {
     $target = Join-Path $stage $relative
     New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
     Copy-Item -LiteralPath $source -Destination $target
+    if ([IO.Path]::GetExtension($relative) -eq '.sh') {
+        $shellText = [IO.File]::ReadAllText($target)
+        $shellText = $shellText.Replace("`r`n", "`n").Replace("`r", "`n")
+        [IO.File]::WriteAllText($target, $shellText, $utf8NoBom)
+    }
 }
 
 $metadata = Join-Path $stage 'SOURCE_METADATA.txt'
