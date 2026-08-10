@@ -101,6 +101,11 @@ if(BUILD_IBAMR_COUPLING)
     ibamr_eel2d_environment
     ibamr_coupling_core)
 
+  add_executable(eel_environment_control test_eel_environment_control.cpp)
+  target_link_libraries(eel_environment_control PRIVATE
+    ibamr_eel2d_environment
+    ibamr_coupling_core)
+
   set(EEL_ENVIRONMENT_RUN_DIR "${CMAKE_CURRENT_BINARY_DIR}/eel-environment-smoke")
   file(MAKE_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}")
   execute_process(
@@ -124,6 +129,15 @@ if(BUILD_IBAMR_COUPLING)
             ${MPIEXEC_PREFLAGS} $<TARGET_FILE:eel_environment_smoke>
             input2d ${MPIEXEC_POSTFLAGS})
   set_tests_properties(eel_environment_smoke PROPERTIES
+    WORKING_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}"
+    TIMEOUT 180)
+
+  add_test(
+    NAME eel_environment_control
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
+            ${MPIEXEC_PREFLAGS} $<TARGET_FILE:eel_environment_control>
+            input2d ${MPIEXEC_POSTFLAGS})
+  set_tests_properties(eel_environment_control PROPERTIES
     WORKING_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}"
     TIMEOUT 180)
 

@@ -3,6 +3,7 @@
 
 #include <mpi.h>
 
+#include <array>
 #include <memory>
 #include <string>
 
@@ -10,6 +11,15 @@ namespace ibamr_smarties
 {
 namespace eel2d
 {
+
+struct ControlIntervalResult
+{
+  double start_time;
+  double end_time;
+  std::array<double, 2> start_com;
+  std::array<double, 2> end_com;
+  unsigned ibamr_steps;
+};
 
 class EelEnvironment
 {
@@ -22,6 +32,12 @@ public:
 
   void initialize(MPI_Comm environment_comm, const std::string& input_file);
   void advanceOneStep();
+  void setTailBeatFrequencyRatio(double ratio);
+  ControlIntervalResult advanceControlInterval(double nominal_duration);
+  double currentTime() const;
+  std::array<double, 2> currentCenterOfMass() const;
+  double currentTailBeatPhase() const;
+  double currentTailBeatFrequencyRatio() const;
   bool stepsRemaining() const;
   void shutdown();
 

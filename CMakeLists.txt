@@ -85,7 +85,10 @@ set(cxx_private_flags
           -Wall -Wextra -pedantic -Wno-unused-parameter -Wno-maybe-uninitialized -fmax-errors=3 -Wno-psabi >)
 target_compile_options(${smarties_core} PRIVATE ${cxx_private_flags})
 
-target_compile_options(${smarties_core} PUBLIC
+# Release optimization is an implementation detail of libsmarties. In
+# particular, -ffast-math must not leak into coupled CFD consumers whose
+# protocol validation depends on detecting NaN and infinity.
+target_compile_options(${smarties_core} PRIVATE
   $<$<CONFIG:Debug>:-O0;-g>
   $<$<CONFIG:Release>:-DNDEBUG;-O3;-ffast-math>
   )

@@ -60,6 +60,12 @@ class EelEnvironment::Impl
 public:
   void initialize(MPI_Comm environment_comm, const std::string& input_file);
   void advanceOneStep();
+  void setTailBeatFrequencyRatio(double ratio);
+  ControlIntervalResult advanceControlInterval(double nominal_duration);
+  double currentTime() const;
+  std::array<double, 2> currentCenterOfMass() const;
+  double currentTailBeatPhase() const;
+  double currentTailBeatFrequencyRatio() const;
   bool stepsRemaining() const;
   void shutdown();
 
@@ -96,7 +102,7 @@ private:
   Pointer<VisItDataWriter<NDIM> > visit_data_writer_;
   Pointer<LSiloDataWriter> silo_data_writer_;
   std::vector<Pointer<ConstraintIBKinematics> > ibkinematics_ops_vec_;
-  Pointer<ConstraintIBKinematics> ib_kinematics_op_;
+  Pointer<IBEELKinematics> ib_kinematics_op_;
   Pointer<IBHydrodynamicForceEvaluator> hydro_force_;
 
   bool dump_viz_data_ = false;
@@ -330,6 +336,66 @@ EelEnvironment::Impl::stepsRemaining() const
          time_integrator_->stepsRemaining();
 }
 
+double
+EelEnvironment::Impl::currentTime() const
+{
+  if (!ready_) throw std::logic_error("EelEnvironment is not initialized");
+  return loop_time_;
+}
+
+std::array<double, 2>
+EelEnvironment::Impl::currentCenterOfMass() const
+{
+  if (!ready_) throw std::logic_error("EelEnvironment is not initialized");
+  return {{ eel_COM_[0], eel_COM_[1] }};
+}
+
+double
+EelEnvironment::Impl::currentTailBeatPhase() const
+{
+  if (!ready_ || ib_kinematics_op_.isNull())
+    throw std::logic_error("EelEnvironment kinematics are not initialized");
+  return ib_kinematics_op_->getTailBeatPhase(loop_time_);
+}
+
+double
+EelEnvironment::Impl::currentTailBeatFrequencyRatio() const
+{
+  if (!ready_ || ib_kinematics_op_.isNull())
+    throw std::logic_error("EelEnvironment kinematics are not initialized");
+  return ib_kinematics_op_->getTailBeatFrequencyRatio();
+}
+
+void
+EelEnvironment::Impl::setTailBeatFrequencyRatio(const double ratio)
+{
+  if (!ready_ || ib_kinematics_op_.isNull())
+    throw std::logic_error("EelEnvironment kinematics are not initialized");
+  ib_kinematics_op_->setTailBeatFrequencyRatio(ratio, loop_time_);
+}
+
+ControlIntervalResult
+EelEnvironment::Impl::advanceControlInterval(const double nominal_duration)
+{
+  if (!std::isfinite(nominal_duration) || nominal_duration <= 0.0)
+    throw std::invalid_argument("control interval duration must be finite and positive");
+  if (!stepsRemaining()) throw std::logic_error("EelEnvironment has no control interval remaining");
+
+  ControlIntervalResult result;
+  result.start_time = loop_time_;
+  result.start_com = currentCenterOfMass();
+  result.ibamr_steps = 0;
+  const double target_time = result.start_time + nominal_duration;
+  while (stepsRemaining() && loop_time_ < target_time)
+  {
+    advanceOneStep();
+    ++result.ibamr_steps;
+  }
+  result.end_time = loop_time_;
+  result.end_com = currentCenterOfMass();
+  return result;
+}
+
 void
 EelEnvironment::Impl::advanceOneStep()
 {
@@ -490,6 +556,42 @@ void
 EelEnvironment::advanceOneStep()
 {
   impl_->advanceOneStep();
+}
+
+void
+EelEnvironment::setTailBeatFrequencyRatio(const double ratio)
+{
+  impl_->setTailBeatFrequencyRatio(ratio);
+}
+
+ControlIntervalResult
+EelEnvironment::advanceControlInterval(const double nominal_duration)
+{
+  return impl_->advanceControlInterval(nominal_duration);
+}
+
+double
+EelEnvironment::currentTime() const
+{
+  return impl_->currentTime();
+}
+
+std::array<double, 2>
+EelEnvironment::currentCenterOfMass() const
+{
+  return impl_->currentCenterOfMass();
+}
+
+double
+EelEnvironment::currentTailBeatPhase() const
+{
+  return impl_->currentTailBeatPhase();
+}
+
+double
+EelEnvironment::currentTailBeatFrequencyRatio() const
+{
+  return impl_->currentTailBeatFrequencyRatio();
 }
 
 bool
