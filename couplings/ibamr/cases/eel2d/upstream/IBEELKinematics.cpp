@@ -15,6 +15,7 @@
 #include "ibtk/IBTK_MPI.h"
 
 #include "CartesianPatchGeometry.h"
+#include "EelLayoutInvariant.h"
 #include "IBEELKinematics.h"
 #include "PatchLevel.h"
 #include "tbox/MathUtilities.h"
@@ -257,6 +258,14 @@ IBEELKinematics::setImmersedBodyLayout(Pointer<PatchHierarchy<NDIM> > patch_hier
         const int NumPtsInHeight = 2 * static_cast<int>(ceil(section / d_mesh_width[1]));
         d_ImmersedBodyData.insert(std::make_pair(s, NumPtsInHeight));
     }
+
+    std::size_t layout_points = 0;
+    for (const auto& section : d_ImmersedBodyData)
+        layout_points += static_cast<std::size_t>(section.second);
+    ibamr_smarties::eel2d::requireEelLayoutPointCount(
+        layout_points,
+        static_cast<std::size_t>(total_lag_pts),
+        { { d_mesh_width[0], d_mesh_width[1] } });
 
     // Find the coordinates of the axis of maneuvering in the reference frame from the input file.
     if (d_bodyIsManeuvering)
