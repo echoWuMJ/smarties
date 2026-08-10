@@ -140,6 +140,23 @@ The adapter uses those actual values for interval-averaged velocity and logs
 tracking, frequency-regularization, and smoothness reward terms separately.
 The frequency penalty is not a physical energy or efficiency measurement.
 
+### Calibrated node3 coarse task
+
+`configs/tasks/speed_tracking_node3_coarse.conf` is the admission configuration
+for the official eel2d case at node3 coarse fidelity. A baseline-ratio run from
+source revision `6b2faccc03f08c7a13edfa7e22f570d0ed54b2ff` advanced 10008 native
+IBAMR steps over 1.0008 simulation-time units and measured global COM
+displacement `(-0.11510557, 0.01536821)`. This gives the measured forward unit
+direction `(-0.99120442, 0.13233973)`.
+
+After the first four control intervals, interval-averaged speeds along that
+direction ranged from 0.12050 to 0.13337. The configured target 0.125 is a
+rounded conservative value inside that observed range, and `velocity_scale`
+uses the same value so nominal observations are order one. One baseline cycle
+is used as warm-up before a 16-decision episode. These values are specific to
+this host, fidelity, case, and calibration revision; they are admission inputs,
+not a claim of physical or control optimality.
+
 The `train` path remains experimental until one immutable revision passes the
 full node3 topology, repeated-run, failure-injection, process-cleanup, and
 evidence-review admission matrix.
