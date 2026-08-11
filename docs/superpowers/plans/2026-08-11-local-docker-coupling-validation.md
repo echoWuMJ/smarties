@@ -472,29 +472,20 @@ set -euo pipefail
 root=/home/data/smarties-local/e01980e8e06a
 run=$root/runs/medium-ratio-1
 reader=$root/evidence/silo-reader
-mapfile -t silo_headers < <(find /root -type f -name silo.h -print)
-test "${#silo_headers[@]}" -eq 1
-silo_include=$(dirname "${silo_headers[0]}")
-silo_prefix=${silo_include%/include}
-if [ -f "$silo_prefix/lib/libsilo.a" ]; then
-  silo_library=$silo_prefix/lib/libsilo.a
-elif [ -f "$silo_prefix/lib64/libsilo.a" ]; then
-  silo_library=$silo_prefix/lib64/libsilo.a
-elif [ -f "$silo_prefix/lib/libsilo.so" ]; then
-  silo_library=$silo_prefix/lib/libsilo.so
-elif [ -f "$silo_prefix/lib64/libsilo.so" ]; then
-  silo_library=$silo_prefix/lib64/libsilo.so
-else
-  printf 'no Silo library matches header prefix %s\n' "$silo_prefix" >&2
-  exit 65
-fi
+source "$root/evidence/resolved-environment.env"
+grep -F 'SET(IBAMR_SILO_VERSION "4.11")' "$IBAMR_DIR/IBAMRConfig.cmake"
+silo_prefix=/root/autoibamr/packages/silo-4.11-bsd
+silo_include=$silo_prefix/include
+silo_library=$silo_prefix/lib/libsilo.a
+test -f "$silo_include/silo.h"
+test -f "$silo_library"
 gcc -std=c99 -O2 -Wall -Wextra -I"$silo_include" "$reader/inspect_silo_points.c" "$silo_library" -lm -o "$reader/inspect_silo_points"
 cd "$run"
 "$reader/inspect_silo_points" viz_eel2d_Str/lag_data.cycle_000000/lag_data.proc_0000.silo viz_eel2d_Str/lag_data.cycle_000040/lag_data.proc_0000.silo viz_eel2d_Str/lag_data.cycle_000080/lag_data.proc_0000.silo > coordinate-summary.txt
 test "$(grep -c 'nels=2932 unique=2932 max_multiplicity=1' coordinate-summary.txt)" -eq 3
 ```
 
-Expected: all three cycles contain 2932 finite unique points and maximum multiplicity one. If multiple Silo headers exist, stop with their recorded paths instead of guessing; the library is selected deterministically from the unique header prefix, preferring the static archive.
+Expected: all three cycles contain 2932 finite unique points and maximum multiplicity one. The reader uses the installed Silo 4.11 prefix that matches `IBAMR_SILO_VERSION` in the resolved IBAMR config; temporary build-tree headers and libraries are not candidates.
 
 - [ ] **Step 5: Run the invalid coarse initialization exactly once**
 
