@@ -181,7 +181,7 @@ Expected: source-tree `libsmarties.so` is absent and the manifest tail contains 
 ### Task 3: Resolve compatibility and perform the isolated build
 
 **Files:**
-- Create: `/home/data/smarties-local/e01980e8e06a/evidence/resolved-environment.env`
+- Consume: `/home/data/smarties-local/e01980e8e06a/evidence/resolved-environment.env`
 - Create: `/home/data/smarties-local/e01980e8e06a/evidence/samrai-patch-check.txt`
 - Create: `/home/data/smarties-local/e01980e8e06a/build/`
 - Create: `/home/data/smarties-local/e01980e8e06a/evidence/configure.log`
@@ -189,30 +189,31 @@ Expected: source-tree `libsmarties.so` is absent and the manifest tail contains 
 - Create: `/home/data/smarties-local/e01980e8e06a/evidence/runtime-identity.txt`
 
 **Interfaces:**
-- Consumes: Task 1 dependency candidates and Task 2 verified source.
+- Consumes: Task 1 dependency candidates, Task 2 verified source, and the admitted overlay from `2026-08-11-local-ibamr-samrai-overlay.md`.
 - Produces: one clean release build whose executable and runtime Smarties library identities are fixed for Tasks 4 and 5.
 
-- [ ] **Step 1: Resolve one compatible IBAMR config and one SAMRAI source**
+- [ ] **Step 1: Verify the admitted overlay consumer interface**
 
-Run inside the container after substituting only candidates already recorded by Task 1:
+Run inside the container:
 
 ```bash
 set -euo pipefail
 root=/home/data/smarties-local/e01980e8e06a
-mapfile -t ibamr_configs < <(find /root -type f -path '*/cmake/ibamr/IBAMRConfig.cmake' -print)
-mapfile -t samrai_sources < <(find /root -type f -path '*/source/hierarchy/boxes/BinaryTree.C' -print)
-test "${#ibamr_configs[@]}" -eq 1
-test "${#samrai_sources[@]}" -eq 1
-ibamr_dir=$(dirname "${ibamr_configs[0]}")
-samrai_source=${samrai_sources[0]%/source/hierarchy/boxes/BinaryTree.C}
-cpu_set=$(lscpu -p=CPU,CORE,SOCKET,ONLINE | awk -F, '$1 !~ /^#/ && $4 == "Y" { key=$3 ":" $2; if (!seen[key]++) selected[++n]=$1; if (n == 2) { print selected[1] "," selected[2]; exit } }')
-test -n "$cpu_set"
-printf 'IBAMR_DIR=%q\nSAMRAI_SOURCE_ROOT=%q\nCC=%q\nCXX=%q\nCPU_SET=%q\n' "$ibamr_dir" "$samrai_source" "$(command -v gcc)" "$(command -v g++)" "$cpu_set" > "$root/evidence/resolved-environment.env"
+source "$root/evidence/resolved-environment.env"
+expected_overlay=$root/deps/ibamr-samrai-subcomm-v1
+test "$OVERLAY_ROOT" = "$expected_overlay"
+case "$IBAMR_DIR" in "$OVERLAY_ROOT"/*) ;; *) exit 65 ;; esac
+case "$SAMRAI_SOURCE_ROOT" in "$OVERLAY_ROOT"/*) ;; *) exit 65 ;; esac
+test -f "$IBAMR_DIR/IBAMRConfig.cmake"
+test -f "$OVERLAY_ROOT/PATCHED_SMARTIES_SAMRAI.sha256"
+test "$CC" = /usr/bin/gcc
+test "$CXX" = /usr/bin/g++
+test "$CPU_SET" = 0,2
 ```
 
-Expected: exactly one candidate of each kind and `CPU_SET` contains two logical CPU IDs belonging to different physical `(socket,core)` pairs. If either dependency count differs from one, stop with the candidate list from Task 1; do not choose by pathname recency.
+Expected: every IBAMR/SAMRAI consumer path is inside the exact overlay, and no original `/root` IBAMR/SAMRAI package is selected.
 
-- [ ] **Step 2: Prove the installed SAMRAI source contains the required communicator patch**
+- [ ] **Step 2: Independently re-prove the overlay SAMRAI communicator patch**
 
 Run:
 
@@ -221,10 +222,11 @@ set -euo pipefail
 root=/home/data/smarties-local/e01980e8e06a
 src=$root/source
 source "$root/evidence/resolved-environment.env"
-patch --dry-run -R -d "$SAMRAI_SOURCE_ROOT" -p1 -i "$src/couplings/ibamr/patches/ibsamrai2-subcommunicator.patch" > "$root/evidence/samrai-patch-check.txt" 2>&1
+patch --batch --dry-run -R -d "$SAMRAI_SOURCE_ROOT" -p1 -i "$src/couplings/ibamr/patches/ibsamrai2-subcommunicator.patch" > "$root/evidence/samrai-patch-check.txt" 2>&1
+SAMRAI_SOURCE_ROOT="$SAMRAI_SOURCE_ROOT" bash "$src/couplings/ibamr/tests/test_samrai_subcommunicator_patch.sh" >> "$root/evidence/samrai-patch-check.txt" 2>&1
 ```
 
-Expected: zero exit proves the patch is already present in the immutable local source. If reverse dry-run fails, stop before configuration and report `LOCAL_IBAMR_SAMRAI_PATCH_NOT_PROVEN`; this plan does not silently patch `/root` or invent an unreviewed overlay build.
+Expected: reverse dry-run and the repository source test both exit zero. The earlier root-install failure remains preserved as `LOCAL_IBAMR_SAMRAI_PATCH_NOT_PROVEN`; it is not overwritten or reclassified.
 
 - [ ] **Step 3: Configure a new release build with the local immutable dependency**
 
