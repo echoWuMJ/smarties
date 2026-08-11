@@ -27,7 +27,7 @@
 - Existing immutable Silo reader: `C:\Users\wumj\Project\IBAMR\.artifacts\stage2-upload\inspect_silo_points.c`
 - Create host mirror root: `D:\dataset_ib\smarties-local\e01980e8e06a`
 - Create container root: `/home/data/smarties-local/e01980e8e06a`
-- Extract source to: `/home/data/smarties-local/e01980e8e06a/source/smarties-ibamr-20260810T170906Z-e01980e8e06a`
+- Extract the flat archive to revision-specific source directory: `/home/data/smarties-local/e01980e8e06a/source`
 - Build in: `/home/data/smarties-local/e01980e8e06a/build`
 - Run in: `/home/data/smarties-local/e01980e8e06a/runs/<run-name>`
 - Store authoritative local evidence in: `/home/data/smarties-local/e01980e8e06a/evidence`
@@ -111,7 +111,7 @@ Expected: four nonempty evidence files. Do not commit raw machine inventory to G
 
 **Files:**
 - Create: `D:\dataset_ib\smarties-local\e01980e8e06a\archives\smarties-ibamr-20260810T170906Z-e01980e8e06a.tar.gz`
-- Create: `/home/data/smarties-local/e01980e8e06a/source/smarties-ibamr-20260810T170906Z-e01980e8e06a/`
+- Create: `/home/data/smarties-local/e01980e8e06a/source/`
 - Create: `/home/data/smarties-local/e01980e8e06a/evidence/source-verification.txt`
 
 **Interfaces:**
@@ -151,7 +151,7 @@ Expected: container SHA-256 is also `efee191bbf6348cb91a54e86c9f658e936b0a11e39a
 Run:
 
 ```powershell
-docker exec ibamr bash -lc 'set -euo pipefail; root=/home/data/smarties-local/e01980e8e06a; src=$root/source/smarties-ibamr-20260810T170906Z-e01980e8e06a; test ! -e "$src"; mkdir -p "$root/source"; tar -xzf "$root/archives/smarties-ibamr-20260810T170906Z-e01980e8e06a.tar.gz" -C "$root/source"; test -f "$src/CMakeLists.txt"'
+docker exec ibamr bash -lc 'set -euo pipefail; root=/home/data/smarties-local/e01980e8e06a; src=$root/source; test ! -e "$src"; mkdir "$src"; tar -xzf "$root/archives/smarties-ibamr-20260810T170906Z-e01980e8e06a.tar.gz" -C "$src"; test -f "$src/CMakeLists.txt"'
 ```
 
 Expected: zero exit; the source directory did not pre-exist.
@@ -161,7 +161,7 @@ Expected: zero exit; the source directory did not pre-exist.
 Run:
 
 ```powershell
-docker exec ibamr bash -lc 'set -euo pipefail; src=/home/data/smarties-local/e01980e8e06a/source/smarties-ibamr-20260810T170906Z-e01980e8e06a; out=/home/data/smarties-local/e01980e8e06a/evidence/source-verification.txt; { grep -Fx "revision=e01980e8e06a77a54071dc97ea029b5d80a49321" "$src/SOURCE_METADATA.txt"; grep -Fx "tracked_dirty=false" "$src/SOURCE_METADATA.txt"; grep -Fx "included_untracked_count=0" "$src/SOURCE_METADATA.txt"; cd "$src"; sha256sum -c SOURCE_MANIFEST.sha256; test "$(wc -l < SOURCE_MANIFEST.sha256)" -eq 355; } > "$out" 2>&1'
+docker exec ibamr bash -lc 'set -euo pipefail; src=/home/data/smarties-local/e01980e8e06a/source; out=/home/data/smarties-local/e01980e8e06a/evidence/source-verification.txt; { grep -Fx "revision=e01980e8e06a77a54071dc97ea029b5d80a49321" "$src/SOURCE_METADATA.txt"; grep -Fx "tracked_dirty=false" "$src/SOURCE_METADATA.txt"; grep -Fx "included_untracked_count=0" "$src/SOURCE_METADATA.txt"; cd "$src"; sha256sum -c SOURCE_MANIFEST.sha256; test "$(wc -l < SOURCE_MANIFEST.sha256)" -eq 355; } > "$out" 2>&1'
 ```
 
 Expected: zero exit, 355 manifest entries report `OK`, and metadata identifies the exact clean revision.
@@ -171,7 +171,7 @@ Expected: zero exit, 355 manifest entries report `OK`, and metadata identifies t
 Run:
 
 ```powershell
-docker exec ibamr bash -lc 'test ! -e /home/data/smarties-local/e01980e8e06a/source/smarties-ibamr-20260810T170906Z-e01980e8e06a/lib/libsmarties.so && tail -n 5 /home/data/smarties-local/e01980e8e06a/evidence/source-verification.txt'
+docker exec ibamr bash -lc 'test ! -e /home/data/smarties-local/e01980e8e06a/source/lib/libsmarties.so && tail -n 5 /home/data/smarties-local/e01980e8e06a/evidence/source-verification.txt'
 ```
 
 Expected: source-tree `libsmarties.so` is absent and the manifest tail contains only `OK` lines.
@@ -219,7 +219,7 @@ Run:
 ```bash
 set -euo pipefail
 root=/home/data/smarties-local/e01980e8e06a
-src=$root/source/smarties-ibamr-20260810T170906Z-e01980e8e06a
+src=$root/source
 source "$root/evidence/resolved-environment.env"
 patch --dry-run -R -d "$SAMRAI_SOURCE_ROOT" -p1 -i "$src/couplings/ibamr/patches/ibsamrai2-subcommunicator.patch" > "$root/evidence/samrai-patch-check.txt" 2>&1
 ```
@@ -233,7 +233,7 @@ Run:
 ```bash
 set -euo pipefail
 root=/home/data/smarties-local/e01980e8e06a
-src=$root/source/smarties-ibamr-20260810T170906Z-e01980e8e06a
+src=$root/source
 build=$root/build
 test ! -e "$build"
 source "$root/evidence/resolved-environment.env"
@@ -263,7 +263,7 @@ Run:
 ```bash
 set -euo pipefail
 root=/home/data/smarties-local/e01980e8e06a
-src=$root/source/smarties-ibamr-20260810T170906Z-e01980e8e06a
+src=$root/source
 build=$root/build
 exe=$build/couplings/ibamr/ibamr_eel2d_smoke
 lib=$build/lib/libsmarties.so
