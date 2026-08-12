@@ -281,7 +281,7 @@ test ! -e "$src/lib/libsmarties.so"
   sha256sum "$exe" "$lib"
   readelf -d "$exe" | grep -E 'RPATH|RUNPATH'
   ldd "$exe"
-  ctest --test-dir "$build" -N
+  (cd "$build" && ctest -N)
 } > "$root/evidence/runtime-identity.txt" 2>&1
 grep -F "$lib" "$root/evidence/runtime-identity.txt"
 grep -F 'Total Tests: 19' "$root/evidence/runtime-identity.txt"
@@ -330,7 +330,8 @@ set -euo pipefail
 root=/home/data/smarties-local/e01980e8e06a
 source "$root/evidence/resolved-environment.env"
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
-taskset -c "$CPU_SET" ctest --test-dir "$root/build" -j1 --output-on-failure -R '^(borrowed_engine_shutdown|borrowed_communicator_alias|mpi_session|communicator_layout|eel_layout_invariant|eel_layout_mismatch_guard|eel_smoke_failure_after_mpi)$' 2>&1 | tee "$root/evidence/focused-ctest.log"
+cd "$root/build"
+taskset -c "$CPU_SET" ctest -j1 --output-on-failure -R '^(borrowed_engine_shutdown|borrowed_communicator_alias|mpi_session|communicator_layout|eel_layout_invariant|eel_layout_mismatch_guard|eel_smoke_failure_after_mpi)$' 2>&1 | tee "$root/evidence/focused-ctest.log"
 ```
 
 Expected: 7/7 tests pass, including the exact MPI abort diagnostic wrapper. On failure, capture Step 4 immediately and stop.
@@ -344,7 +345,8 @@ set -euo pipefail
 root=/home/data/smarties-local/e01980e8e06a
 source "$root/evidence/resolved-environment.env"
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
-taskset -c "$CPU_SET" ctest --test-dir "$root/build" -j1 --output-on-failure 2>&1 | tee "$root/evidence/full-ctest.log"
+cd "$root/build"
+taskset -c "$CPU_SET" ctest -j1 --output-on-failure 2>&1 | tee "$root/evidence/full-ctest.log"
 ```
 
 Expected: `100% tests passed, 0 tests failed out of 19`. Existing per-test timeouts remain unchanged. Do not launch a second full suite if this command fails.
