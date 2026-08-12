@@ -79,11 +79,16 @@ if(UNIX)
     COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test_node3_scripts.sh")
 
   if(DEFINED ENV{SAMRAI_SOURCE_ROOT})
+    if(DEFINED ENV{SAMRAI_PRISTINE_SOURCE_ROOT})
+      set(SAMRAI_PATCH_FIXTURE_SOURCE_ROOT "$ENV{SAMRAI_PRISTINE_SOURCE_ROOT}")
+    else()
+      set(SAMRAI_PATCH_FIXTURE_SOURCE_ROOT "$ENV{SAMRAI_SOURCE_ROOT}")
+    endif()
     add_test(
       NAME samrai_subcommunicator_patch
       COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test_samrai_subcommunicator_patch.sh")
     set_tests_properties(samrai_subcommunicator_patch PROPERTIES
-      ENVIRONMENT "SAMRAI_SOURCE_ROOT=$ENV{SAMRAI_SOURCE_ROOT}")
+      ENVIRONMENT "SAMRAI_SOURCE_ROOT=${SAMRAI_PATCH_FIXTURE_SOURCE_ROOT}")
   endif()
 endif()
 

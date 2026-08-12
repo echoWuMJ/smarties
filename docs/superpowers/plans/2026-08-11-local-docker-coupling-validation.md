@@ -245,6 +245,7 @@ build=$root/build
 test ! -e "$build"
 source "$root/evidence/resolved-environment.env"
 export SAMRAI_SOURCE_ROOT
+export SAMRAI_PRISTINE_SOURCE_ROOT=/root/autoibamr/tmp/unpack/IBSAMRAI2-2025.10.29
 cmake -S "$src" -B "$build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" -DCOMPILE_PY_SO=OFF -DBUILD_IBAMR_COUPLING=ON -DBUILD_IBAMR_COUPLING_TESTS=ON -DIBAMR_DIR="$IBAMR_DIR" 2>&1 | tee "$root/evidence/configure.log"
 ```
 
