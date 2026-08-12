@@ -182,7 +182,8 @@ Expected: source-tree `libsmarties.so` is absent and the manifest tail contains 
 
 **Files:**
 - Consume: `/home/data/smarties-local/e01980e8e06a/evidence/resolved-environment.env`
-- Create: `/home/data/smarties-local/e01980e8e06a/evidence/samrai-patch-check.txt`
+- Preserve: `/home/data/smarties-local/e01980e8e06a/evidence/samrai-patch-check.txt`
+- Create: `/home/data/smarties-local/e01980e8e06a/evidence/samrai-overlay-patch-check.txt`
 - Create: `/home/data/smarties-local/e01980e8e06a/build/`
 - Create: `/home/data/smarties-local/e01980e8e06a/evidence/configure.log`
 - Create: `/home/data/smarties-local/e01980e8e06a/evidence/build.log`
@@ -222,8 +223,8 @@ set -euo pipefail
 root=/home/data/smarties-local/e01980e8e06a
 src=$root/source
 source "$root/evidence/resolved-environment.env"
-patch --batch --dry-run -R -d "$SAMRAI_SOURCE_ROOT" -p1 -i "$src/couplings/ibamr/patches/ibsamrai2-subcommunicator.patch" > "$root/evidence/samrai-patch-check.txt" 2>&1
-SAMRAI_SOURCE_ROOT=/root/autoibamr/tmp/unpack/IBSAMRAI2-2025.10.29 bash "$src/couplings/ibamr/tests/test_samrai_subcommunicator_patch.sh" >> "$root/evidence/samrai-patch-check.txt" 2>&1
+patch --batch --dry-run -R -d "$SAMRAI_SOURCE_ROOT" -p1 -i "$src/couplings/ibamr/patches/ibsamrai2-subcommunicator.patch" > "$root/evidence/samrai-overlay-patch-check.txt" 2>&1
+SAMRAI_SOURCE_ROOT=/root/autoibamr/tmp/unpack/IBSAMRAI2-2025.10.29 bash "$src/couplings/ibamr/tests/test_samrai_subcommunicator_patch.sh" >> "$root/evidence/samrai-overlay-patch-check.txt" 2>&1
 ```
 
 Expected: reverse dry-run proves the overlay source is patched; the repository
