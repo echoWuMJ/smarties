@@ -138,7 +138,7 @@ Expected: both diff files are empty.
 - Consumes: Task 1 pristine SAMRAI copy and repository patch.
 - Produces: one demonstrably patched SAMRAI source and immutable patch marker.
 
-- [ ] **Step 1: RED — prove the pristine copy does not satisfy reverse dry-run**
+- [ ] **Step 1: RED — prove the pristine copy still accepts the forward patch**
 
 Run:
 
@@ -146,15 +146,14 @@ Run:
 set -euo pipefail
 root=/home/data/smarties-local/e01980e8e06a
 overlay=$root/deps/ibamr-samrai-subcomm-v1
-set +e
-patch --batch --dry-run -R -d "$overlay/src/IBSAMRAI2-2025.10.29" -p1 -i "$root/source/couplings/ibamr/patches/ibsamrai2-subcommunicator.patch" > "$overlay/evidence/patch-pristine-reverse.log" 2>&1
-status=$?
-set -e
-printf '%s\n' "$status" > "$overlay/evidence/patch-pristine-reverse.exit"
-test "$status" -ne 0
+patch --batch --dry-run --forward -d "$overlay/src/IBSAMRAI2-2025.10.29" -p1 -i "$root/source/couplings/ibamr/patches/ibsamrai2-subcommunicator.patch" > "$overlay/evidence/patch-pristine-forward.log" 2>&1
+grep -q 'MPI_COMM_WORLD' "$overlay/src/IBSAMRAI2-2025.10.29/source/hierarchy/boxes/BinaryTree.C"
 ```
 
-Expected: nonzero exit, demonstrating the copy is not already patched.
+Expected: zero exit plus the old operational communicator token, demonstrating
+that the pristine copy has not already received the patch. Do not use a reverse
+dry-run as this RED predicate: GNU patch may detect an unreversed patch, ignore
+`-R`, run a forward check, and still return zero.
 
 - [ ] **Step 2: Prove the forward dry-run succeeds**
 
@@ -191,14 +190,24 @@ set -euo pipefail
 root=/home/data/smarties-local/e01980e8e06a
 overlay=$root/deps/ibamr-samrai-subcomm-v1
 patched=$overlay/src/IBSAMRAI2-2025.10.29
+pristine=/root/autoibamr/tmp/unpack/IBSAMRAI2-2025.10.29
+set +e
+patch --batch --dry-run --forward -d "$patched" -p1 -i "$root/source/couplings/ibamr/patches/ibsamrai2-subcommunicator.patch" > "$overlay/evidence/patch-patched-forward.log" 2>&1
+forward_status=$?
+set -e
+test "$forward_status" -ne 0
 patch --batch --dry-run -R -d "$patched" -p1 -i "$root/source/couplings/ibamr/patches/ibsamrai2-subcommunicator.patch" > "$overlay/evidence/patch-reverse-dry-run.log" 2>&1
-SAMRAI_SOURCE_ROOT="$patched" bash "$root/source/couplings/ibamr/tests/test_samrai_subcommunicator_patch.sh" > "$overlay/evidence/samrai-source-test.log" 2>&1
+SAMRAI_SOURCE_ROOT="$pristine" bash "$root/source/couplings/ibamr/tests/test_samrai_subcommunicator_patch.sh" > "$overlay/evidence/samrai-source-test.log" 2>&1
 patch_sha=$(sha256sum "$root/source/couplings/ibamr/patches/ibsamrai2-subcommunicator.patch" | awk '{print $1}')
 printf '%s\n' "$patch_sha" > "$overlay/PATCHED_SMARTIES_SAMRAI.sha256"
 test "$(wc -c < "$overlay/PATCHED_SMARTIES_SAMRAI.sha256")" -eq 65
 ```
 
-Expected: reverse dry-run and repository patch test both exit zero; marker is one 64-hex SHA-256 plus newline.
+Expected: the forward-only check is rejected and reverse dry-run proves the
+overlay is patched, while the repository patch test independently proves the
+same patch transforms the immutable pristine source into the expected
+subcommunicator implementation. The latter two checks exit zero; marker is one
+64-hex SHA-256 plus newline.
 
 ---
 
@@ -346,8 +355,9 @@ set -euo pipefail
 root=/home/data/smarties-local/e01980e8e06a
 overlay=$root/deps/ibamr-samrai-subcomm-v1
 patched=$overlay/src/IBSAMRAI2-2025.10.29
+pristine=/root/autoibamr/tmp/unpack/IBSAMRAI2-2025.10.29
 patch --batch --dry-run -R -d "$patched" -p1 -i "$root/source/couplings/ibamr/patches/ibsamrai2-subcommunicator.patch" > "$overlay/evidence/final-patch-reverse.log" 2>&1
-SAMRAI_SOURCE_ROOT="$patched" bash "$root/source/couplings/ibamr/tests/test_samrai_subcommunicator_patch.sh" > "$overlay/evidence/final-samrai-source-test.log" 2>&1
+SAMRAI_SOURCE_ROOT="$pristine" bash "$root/source/couplings/ibamr/tests/test_samrai_subcommunicator_patch.sh" > "$overlay/evidence/final-samrai-source-test.log" 2>&1
 ```
 
 Expected: both checks exit zero.
