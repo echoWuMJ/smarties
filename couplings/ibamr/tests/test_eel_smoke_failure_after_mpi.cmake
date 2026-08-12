@@ -40,7 +40,7 @@ if(NOT combined MATCHES "MPI_ABORT was invoked on rank")
   message(FATAL_ERROR
     "missing Open MPI abort marker (status ${status}):\n${combined}")
 endif()
-if(NOT combined MATCHES "Errorcode: 98")
+if(NOT combined MATCHES "[Ee]rrorcode:? 98")
   message(FATAL_ERROR
     "missing injected MPI abort error code (status ${status}):\n${combined}")
 endif()
