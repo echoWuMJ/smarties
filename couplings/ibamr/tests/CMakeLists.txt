@@ -214,6 +214,21 @@ if(BUILD_IBAMR_COUPLING)
     TIMEOUT 900)
 
   add_test(
+    NAME eel_fixed_action_probe
+    COMMAND "${CMAKE_COMMAND}"
+      "-DPROBE_EXECUTABLE=${CMAKE_CURRENT_BINARY_DIR}/../frequency_response_probe"
+      "-DMPIEXEC_EXECUTABLE=${MPIEXEC_EXECUTABLE}"
+      "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+      "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
+      "-DMPIEXEC_POSTFLAGS=${MPIEXEC_POSTFLAGS}"
+      "-DINPUT_FILE=${EEL_ENVIRONMENT_RUN_DIR}/input2d"
+      "-DTASK_FILE=${EEL_ENVIRONMENT_RUN_DIR}/task.conf"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_eel_fixed_action_probe.cmake")
+  set_tests_properties(eel_fixed_action_probe PROPERTIES
+    WORKING_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}"
+    TIMEOUT 900)
+
+  add_test(
     NAME eel_smoke_protocol
     COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
             ${MPIEXEC_PREFLAGS} $<TARGET_FILE:eel_smoke_protocol>
