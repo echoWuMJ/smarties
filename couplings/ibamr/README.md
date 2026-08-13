@@ -171,8 +171,11 @@ ctest --test-dir /data2/mjwu/local/coupling-build/<snapshot> \
 
 The gate runs the official-medium case sequentially with one and then two
 environment ranks in isolated directories. It compares the physical stream and
-derived reward, not wall-clock speed. The outer safety timeout is an
-inconclusive operational boundary, not a physical mismatch. A pass does not
+derived reward, not wall-clock speed. Each child has a 900-second operational
+timeout; the 1860-second outer timeout is strictly larger than both sequential
+child limits plus teardown/reporting overhead and remains a safety ceiling.
+Either timeout is an inconclusive operational boundary, not a physical
+mismatch. A pass does not
 prove scaling, long-horizon stability, reset behavior, training convergence, or
 policy quality.
 

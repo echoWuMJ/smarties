@@ -9,11 +9,15 @@ foreach(path PROBE_EXECUTABLE INPUT_FILE VERTEX_FILE TASK_FILE COMPARE_MODULE)
   endif()
 endforeach()
 if(NOT DRY_FIXTURE_MODE)
-  foreach(required MPIEXEC_EXECUTABLE MPIEXEC_NUMPROC_FLAG)
+  foreach(required MPIEXEC_EXECUTABLE MPIEXEC_NUMPROC_FLAG CHILD_TIMEOUT_SECONDS)
     if(NOT DEFINED ${required} OR "${${required}}" STREQUAL "")
       message(FATAL_ERROR "eel MPI consistency orchestrator requires ${required}")
     endif()
   endforeach()
+  if(NOT CHILD_TIMEOUT_SECONDS MATCHES "^[0-9]+([.][0-9]+)?$" OR
+     NOT CHILD_TIMEOUT_SECONDS GREATER 0)
+    message(FATAL_ERROR "CHILD_TIMEOUT_SECONDS must be positive")
+  endif()
 endif()
 
 file(REMOVE_RECURSE "${RUN_ROOT}")
@@ -76,10 +80,15 @@ function(eel_run_fixed_action_child rank run_directory status_out classification
     WORKING_DIRECTORY "${run_directory}"
     RESULT_VARIABLE child_status
     OUTPUT_FILE "${run_directory}/stdout.log"
-    ERROR_FILE "${run_directory}/stderr.log")
+    ERROR_FILE "${run_directory}/stderr.log"
+    TIMEOUT "${CHILD_TIMEOUT_SECONDS}")
   file(WRITE "${run_directory}/status.txt" "${child_status}\n")
   set(${status_out} "${child_status}" PARENT_SCOPE)
-  set(${classification_out} "EXIT" PARENT_SCOPE)
+  if(child_status MATCHES "[Tt]imeout")
+    set(${classification_out} "TIMEOUT" PARENT_SCOPE)
+  else()
+    set(${classification_out} "EXIT" PARENT_SCOPE)
+  endif()
 endfunction()
 
 function(eel_write_report verdict detail)

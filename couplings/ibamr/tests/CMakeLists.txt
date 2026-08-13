@@ -200,6 +200,7 @@ if(BUILD_IBAMR_COUPLING)
       "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
       "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
       "-DMPIEXEC_POSTFLAGS=${MPIEXEC_POSTFLAGS}"
+      "-DCHILD_TIMEOUT_SECONDS=900"
       "-DINPUT_FILE=${EEL_ENVIRONMENT_RUN_DIR}/input2d.coarse"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/test_eel_layout_mismatch.cmake")
   set_tests_properties(eel_layout_mismatch_guard PROPERTIES
@@ -251,7 +252,7 @@ if(BUILD_IBAMR_COUPLING)
       -P "${CMAKE_CURRENT_SOURCE_DIR}/test_eel_mpi_consistency.cmake")
   set_tests_properties(eel_mpi_consistency PROPERTIES
     LABELS "physical;node3"
-    TIMEOUT 2100)
+    TIMEOUT 1860)
 
   add_test(
     NAME eel_smoke_protocol

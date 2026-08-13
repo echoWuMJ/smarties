@@ -14,6 +14,16 @@ endforeach()
 file(WRITE "${root}/poison-comparator.cmake"
   "message(FATAL_ERROR \"physics comparator must not run after an operational timeout\")\n")
 
+if(WIN32)
+  set(fake_launcher "${root}/fake-mpiexec.cmd")
+  file(WRITE "${fake_launcher}" "@echo off\r\n\"${CMAKE_COMMAND}\" \"-DFAKE_RANK=%2\" -DINPUT_FILE=input2d -DTASK_FILE=task.conf -DACTION=1.0 -DDECISIONS=2 -DFAKE_SLEEP_SECONDS=2 -P \"%~3\"\r\nexit /b %ERRORLEVEL%\r\n")
+else()
+  set(fake_launcher "${root}/fake-mpiexec")
+  file(WRITE "${fake_launcher}" "#!/bin/sh\nexec \"${CMAKE_COMMAND}\" \"-DFAKE_RANK=$2\" -DINPUT_FILE=input2d -DTASK_FILE=task.conf -DACTION=1.0 -DDECISIONS=2 -DFAKE_SLEEP_SECONDS=2 -P \"$3\"\n")
+  file(CHMOD "${fake_launcher}"
+    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+endif()
+
 function(run_case name expected_status expected_verdict)
   set(case_root "${root}/${name}")
   execute_process(
@@ -66,4 +76,34 @@ run_case(timeout 1 INCONCLUSIVE_OPERATIONAL_TIMEOUT
 file(READ "${root}/timeout/rank-2/status.txt" timeout_rank_two)
 if(NOT timeout_rank_two STREQUAL "NOT_RUN\n")
   message(FATAL_ERROR "rank 2 ran after rank 1 timeout: '${timeout_rank_two}'")
+endif()
+
+set(real_timeout_root "${root}/real-timeout")
+execute_process(
+  COMMAND "${CMAKE_COMMAND}"
+    "-DPROBE_EXECUTABLE=${FAKE_PROBE}"
+    "-DMPIEXEC_EXECUTABLE=${fake_launcher}"
+    "-DMPIEXEC_NUMPROC_FLAG=-n"
+    "-DCHILD_TIMEOUT_SECONDS=0.1"
+    "-DINPUT_FILE=${root}/source/input2d"
+    "-DVERTEX_FILE=${root}/source/eel2d.vertex"
+    "-DTASK_FILE=${root}/source/task.conf"
+    "-DCOMPARE_MODULE=${root}/poison-comparator.cmake"
+    "-DRUN_ROOT=${real_timeout_root}"
+    -P "${ORCHESTRATOR}"
+  RESULT_VARIABLE real_timeout_status
+  OUTPUT_VARIABLE real_timeout_stdout
+  ERROR_VARIABLE real_timeout_stderr)
+if(real_timeout_status EQUAL 0)
+  message(FATAL_ERROR "real sleep probe incorrectly passed its child timeout")
+endif()
+file(READ "${real_timeout_root}/report.txt" real_timeout_report)
+if(NOT real_timeout_report MATCHES "^INCONCLUSIVE_OPERATIONAL_TIMEOUT")
+  message(FATAL_ERROR
+    "real child timeout was not classified inconclusive: '${real_timeout_report}'\n${real_timeout_stdout}\n${real_timeout_stderr}")
+endif()
+file(READ "${real_timeout_root}/rank-2/status.txt" real_timeout_rank_two)
+if(NOT real_timeout_rank_two STREQUAL "NOT_RUN\n")
+  message(FATAL_ERROR
+    "rank 2 ran after a real child timeout: '${real_timeout_rank_two}'")
 endif()
