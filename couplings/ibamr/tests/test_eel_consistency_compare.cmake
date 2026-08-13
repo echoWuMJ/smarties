@@ -21,6 +21,38 @@ EEL_FIXED_ACTION_SUMMARY environment_ranks=1 decisions=2 ibamr_steps=2502 elapse
 string(REPLACE "environment_ranks=1" "environment_ranks=2" two_stream "${one_stream}")
 expect_result("matching physical streams" "${one_stream}" "${two_stream}" "PASS" "all fields match")
 
+# These literal deltas enforce the required numerical acceptance contract.
+# A permissive 1e-9/1e-6 comparator incorrectly accepts every "outside" case.
+string(REPLACE "target_ratio=1.5" "target_ratio=1.500000000002" control_step_inside "${two_stream}")
+expect_result("control step inside tolerance" "${one_stream}" "${control_step_inside}" "PASS" "all fields match")
+string(REPLACE "target_ratio=1.5" "target_ratio=1.500000000003" control_step_outside "${two_stream}")
+expect_result("control step outside tolerance" "${one_stream}" "${control_step_outside}" "PHYSICAL_MISMATCH" "decision=1 field=target_ratio")
+
+string(REPLACE "end_com_x=0.01" "end_com_x=0.0100000001" physical_step_inside "${two_stream}")
+expect_result("physical step inside tolerance" "${one_stream}" "${physical_step_inside}" "PASS" "all fields match")
+string(REPLACE "end_com_x=0.01" "end_com_x=0.0100000003" physical_step_outside "${two_stream}")
+expect_result("physical step outside tolerance" "${one_stream}" "${physical_step_outside}" "PHYSICAL_MISMATCH" "decision=1 field=end_com_x")
+
+string(REPLACE "reward_total=-0.127648" "reward_total=-0.127648001" reward_step_inside "${two_stream}")
+expect_result("reward step inside tolerance" "${one_stream}" "${reward_step_inside}" "PASS" "all fields match")
+string(REPLACE "reward_total=-0.127648" "reward_total=-0.127648002" reward_step_outside "${two_stream}")
+expect_result("reward step outside tolerance" "${one_stream}" "${reward_step_outside}" "REWARD_MISMATCH" "decision=1 field=reward_total")
+
+string(REPLACE "elapsed_time=0.2502" "elapsed_time=0.250200000001" control_summary_inside "${two_stream}")
+expect_result("control summary inside tolerance" "${one_stream}" "${control_summary_inside}" "PASS" "all fields match")
+string(REPLACE "elapsed_time=0.2502" "elapsed_time=0.250200000002" control_summary_outside "${two_stream}")
+expect_result("control summary outside tolerance" "${one_stream}" "${control_summary_outside}" "PHYSICAL_MISMATCH" "decision=2 field=elapsed_time")
+
+string(REPLACE "displacement_x=0.021" "displacement_x=0.0210000001" physical_summary_inside "${two_stream}")
+expect_result("physical summary inside tolerance" "${one_stream}" "${physical_summary_inside}" "PASS" "all fields match")
+string(REPLACE "displacement_x=0.021" "displacement_x=0.0210000004" physical_summary_outside "${two_stream}")
+expect_result("physical summary outside tolerance" "${one_stream}" "${physical_summary_outside}" "PHYSICAL_MISMATCH" "decision=2 field=displacement_x")
+
+string(REPLACE "reward_total=-0.337878" "reward_total=-0.337878001" reward_summary_inside "${two_stream}")
+expect_result("reward summary inside tolerance" "${one_stream}" "${reward_summary_inside}" "PASS" "all fields match")
+string(REPLACE "reward_total=-0.337878" "reward_total=-0.337878005" reward_summary_outside "${two_stream}")
+expect_result("reward summary outside tolerance" "${one_stream}" "${reward_summary_outside}" "REWARD_MISMATCH" "decision=2 field=reward_total")
+
 string(REPLACE "end_com_x=0.01" "end_com_x=0.02" physical_stream "${two_stream}")
 expect_result("physical difference" "${one_stream}" "${physical_stream}" "PHYSICAL_MISMATCH" "decision=1 field=end_com_x")
 
