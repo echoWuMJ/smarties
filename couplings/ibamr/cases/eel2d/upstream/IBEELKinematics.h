@@ -24,6 +24,7 @@
 #include "tbox/Database.h"
 #include "tbox/Pointer.h"
 
+#include <cstddef>
 #include <iostream>
 #include <map>
 #include <vector>
@@ -104,6 +105,8 @@ public:
 
     double getTailBeatAngularFrequency() const;
 
+    std::size_t getGlobalLagrangianPointCount() const;
+
     /*!
      * \brief Override the ConstraintIBkinematics base class method.
      */
@@ -158,6 +161,8 @@ private:
      */
     std::vector<std::vector<double> > d_kinematics_vel;
     std::vector<std::vector<double> > d_shape;
+
+    std::size_t d_global_lagrangian_point_count = 0;
 
     /*!
      * Save COM, tagged point position and incremented angle from reference axis for restarted runs.

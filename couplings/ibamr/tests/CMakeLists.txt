@@ -35,6 +35,11 @@ target_include_directories(eel_control_task_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d)
 target_link_libraries(eel_control_task_test PRIVATE ibamr_eel_control)
 
+add_executable(eel_control_measurement_test test_eel_control_measurement.cpp)
+target_include_directories(eel_control_measurement_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d)
+target_link_libraries(eel_control_measurement_test PRIVATE ibamr_eel_control)
+
 add_executable(eel_layout_invariant_test test_eel_layout_invariant.cpp)
 target_include_directories(eel_layout_invariant_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d)
@@ -70,6 +75,8 @@ add_test(
   NAME eel_control_task
   COMMAND eel_control_task_test
           ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/speed_tracking_test.conf)
+
+add_test(NAME eel_control_measurement COMMAND eel_control_measurement_test)
 
 add_test(NAME eel_layout_invariant COMMAND eel_layout_invariant_test)
 

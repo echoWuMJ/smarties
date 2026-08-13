@@ -66,6 +66,7 @@ public:
   std::array<double, 2> currentCenterOfMass() const;
   double currentTailBeatPhase() const;
   double currentTailBeatFrequencyRatio() const;
+  std::size_t globalLagrangianPointCount() const;
   bool stepsRemaining() const;
   void shutdown();
 
@@ -366,6 +367,14 @@ EelEnvironment::Impl::currentTailBeatFrequencyRatio() const
   return ib_kinematics_op_->getTailBeatFrequencyRatio();
 }
 
+std::size_t
+EelEnvironment::Impl::globalLagrangianPointCount() const
+{
+  if (!ready_ || ib_kinematics_op_.isNull())
+    throw std::logic_error("EelEnvironment kinematics are not initialized");
+  return ib_kinematics_op_->getGlobalLagrangianPointCount();
+}
+
 void
 EelEnvironment::Impl::setTailBeatFrequencyRatio(const double ratio)
 {
@@ -592,6 +601,12 @@ double
 EelEnvironment::currentTailBeatFrequencyRatio() const
 {
   return impl_->currentTailBeatFrequencyRatio();
+}
+
+std::size_t
+EelEnvironment::globalLagrangianPointCount() const
+{
+  return impl_->globalLagrangianPointCount();
 }
 
 bool

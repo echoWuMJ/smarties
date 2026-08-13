@@ -1,9 +1,12 @@
 #ifndef IBAMR_SMARTIES_EEL_ENVIRONMENT_H
 #define IBAMR_SMARTIES_EEL_ENVIRONMENT_H
 
+#include "EelControlMeasurement.h"
+
 #include <mpi.h>
 
 #include <array>
+#include <cstddef>
 #include <memory>
 #include <string>
 
@@ -11,15 +14,6 @@ namespace ibamr_smarties
 {
 namespace eel2d
 {
-
-struct ControlIntervalResult
-{
-  double start_time;
-  double end_time;
-  std::array<double, 2> start_com;
-  std::array<double, 2> end_com;
-  unsigned ibamr_steps;
-};
 
 class EelEnvironment
 {
@@ -38,6 +32,7 @@ public:
   std::array<double, 2> currentCenterOfMass() const;
   double currentTailBeatPhase() const;
   double currentTailBeatFrequencyRatio() const;
+  std::size_t globalLagrangianPointCount() const;
   bool stepsRemaining() const;
   void shutdown();
 

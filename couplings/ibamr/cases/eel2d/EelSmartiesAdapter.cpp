@@ -1,5 +1,6 @@
 #include "EelSmartiesAdapter.h"
 
+#include "EelControlMeasurement.h"
 #include "EelControlTask.h"
 #include "EelEnvironment.h"
 
@@ -105,22 +106,6 @@ ControlOptions parseControlOptions(int argc, char** argv, MPI_Comm comm)
   if (options.input_file.empty()) abortInvalidOption(comm, "--input-file must not be empty");
   if (options.task_file.empty()) abortInvalidOption(comm, "--task-file is required");
   return options;
-}
-
-double forwardVelocity(const ControlIntervalResult& interval,
-                       const EelTaskConfig& config)
-{
-  const double elapsed = interval.end_time - interval.start_time;
-  if (!std::isfinite(elapsed) || elapsed <= 0.0)
-    throw std::runtime_error("non-positive or non-finite eel control interval");
-  const double displacement_x = interval.end_com[0] - interval.start_com[0];
-  const double displacement_y = interval.end_com[1] - interval.start_com[1];
-  const double velocity =
-    (displacement_x * config.forward_direction_x +
-     displacement_y * config.forward_direction_y) / elapsed;
-  if (!std::isfinite(velocity))
-    throw std::runtime_error("non-finite eel forward velocity");
-  return velocity;
 }
 
 std::vector<double> asVector(const std::array<double, 5>& state)

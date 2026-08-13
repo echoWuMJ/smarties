@@ -220,6 +220,7 @@ IBEELKinematics::setImmersedBodyLayout(Pointer<PatchHierarchy<NDIM> > patch_hier
     TBOX_ASSERT(coarsest_ln == finest_ln);
     const std::vector<std::pair<int, int> >& idx_range = struct_param.getLagIdxRange();
     const int total_lag_pts = idx_range[0].second - idx_range[0].first;
+    d_global_lagrangian_point_count = static_cast<std::size_t>(total_lag_pts);
 
     for (int d = 0; d < NDIM; ++d)
     {
@@ -328,6 +329,12 @@ IBEELKinematics::setImmersedBodyLayout(Pointer<PatchHierarchy<NDIM> > patch_hier
     return;
 
 } // setImmersedBodyLayout
+
+std::size_t
+IBEELKinematics::getGlobalLagrangianPointCount() const
+{
+    return d_global_lagrangian_point_count;
+}
 
 void
 IBEELKinematics::transformManeuverAxisAndCalculateTangents(const double angleFromHorizontal)

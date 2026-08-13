@@ -47,7 +47,9 @@ int main(int argc, char** argv)
   ibamr_smarties::MpiSession mpi(argc, argv);
   EelEnvironment environment;
   if (!throws<std::logic_error>([&] { environment.currentTime(); })) return 16;
+  if (!throws<std::logic_error>([&] { environment.globalLagrangianPointCount(); })) return 17;
   environment.initialize(mpi.world(), argv[1]);
+  if (environment.globalLagrangianPointCount() != 2932) return 7;
 
   const double nan = std::numeric_limits<double>::quiet_NaN();
   if (!throws<std::invalid_argument>([&] { environment.setTailBeatFrequencyRatio(0.0); })) return 17;
