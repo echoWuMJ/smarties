@@ -91,6 +91,7 @@ add_test(
   COMMAND "${CMAKE_COMMAND}"
     "-DORCHESTRATOR=${CMAKE_CURRENT_SOURCE_DIR}/test_eel_mpi_consistency.cmake"
     "-DFAKE_PROBE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fake_eel_fixed_action_probe.cmake"
+    "-DREGISTRATION_FILE=${CMAKE_CURRENT_LIST_FILE}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/test_eel_mpi_consistency_orchestration.cmake")
 
 if(UNIX)

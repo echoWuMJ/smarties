@@ -4,6 +4,13 @@ foreach(required ORCHESTRATOR FAKE_PROBE REGISTRATION_FILE)
   endif()
 endforeach()
 
+get_filename_component(actual_registration "${REGISTRATION_FILE}" REALPATH)
+get_filename_component(expected_registration "${CMAKE_CURRENT_LIST_DIR}/CMakeLists.txt" REALPATH)
+if(NOT actual_registration STREQUAL expected_registration)
+  message(FATAL_ERROR
+    "REGISTRATION_FILE must point to tests/CMakeLists.txt; got '${actual_registration}'")
+endif()
+
 file(READ "${REGISTRATION_FILE}" registration)
 function(read_test_registration test_name next_test_name output)
   string(FIND "${registration}" "add_test(\n    NAME ${test_name}" start)
@@ -25,6 +32,26 @@ list(LENGTH consistency_timeouts consistency_timeout_count)
 if(NOT layout_timeout_count EQUAL 0 OR NOT consistency_timeout_count EQUAL 1)
   message(FATAL_ERROR
     "CHILD_TIMEOUT_SECONDS registration must occur once on eel_mpi_consistency and never on eel_layout_mismatch_guard; got consistency=${consistency_timeout_count} layout=${layout_timeout_count}")
+endif()
+
+string(FIND "${registration}" "add_test(\n  NAME eel_mpi_consistency_orchestration" orchestration_start)
+string(FIND "${registration}" "\nif(UNIX)" orchestration_finish)
+if(orchestration_start EQUAL -1 OR orchestration_finish EQUAL -1 OR
+   NOT orchestration_finish GREATER orchestration_start)
+  message(FATAL_ERROR "cannot isolate eel_mpi_consistency_orchestration CTest registration")
+endif()
+math(EXPR orchestration_length "${orchestration_finish} - ${orchestration_start}")
+string(SUBSTRING "${registration}" ${orchestration_start} ${orchestration_length}
+  orchestration_registration)
+string(REGEX MATCHALL "-DREGISTRATION_FILE=" registration_arguments
+  "${orchestration_registration}")
+list(LENGTH registration_arguments registration_argument_count)
+string(FIND "${orchestration_registration}"
+  [=["-DREGISTRATION_FILE=${CMAKE_CURRENT_LIST_FILE}"]=]
+  registration_value_match)
+if(NOT registration_argument_count EQUAL 1 OR registration_value_match EQUAL -1)
+  message(FATAL_ERROR
+    "eel_mpi_consistency_orchestration must pass REGISTRATION_FILE exactly once as tests/CMakeLists.txt")
 endif()
 
 set(root "${CMAKE_CURRENT_BINARY_DIR}/eel-mpi-consistency-orchestration")
