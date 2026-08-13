@@ -73,6 +73,12 @@ add_test(
 
 add_test(NAME eel_layout_invariant COMMAND eel_layout_invariant_test)
 
+add_test(
+  NAME eel_consistency_compare
+  COMMAND "${CMAKE_COMMAND}"
+    "-DCOMPARE_MODULE=${CMAKE_CURRENT_SOURCE_DIR}/EelConsistencyCompare.cmake"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test_eel_consistency_compare.cmake")
+
 if(UNIX)
   add_test(
     NAME node3_scripts
