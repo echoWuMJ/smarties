@@ -160,6 +160,22 @@ evidence-review admission matrix.
 
 ## Tests
 
+### One-rank/two-rank physical consistency gate
+
+On the configured node3 build, select the focused gate with:
+
+```bash
+ctest --test-dir /data2/mjwu/local/coupling-build/<snapshot> \
+  -R '^eel_mpi_consistency$' --output-on-failure
+```
+
+The gate runs the official-medium case sequentially with one and then two
+environment ranks in isolated directories. It compares the physical stream and
+derived reward, not wall-clock speed. The outer safety timeout is an
+inconclusive operational boundary, not a physical mismatch. A pass does not
+prove scaling, long-horizon stability, reset behavior, training convergence, or
+policy quality.
+
 ```bash
 bash couplings/ibamr/tests/test_node3_scripts.sh
 powershell.exe -NoProfile -ExecutionPolicy Bypass \

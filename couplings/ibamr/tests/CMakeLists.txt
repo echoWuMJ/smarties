@@ -86,6 +86,13 @@ add_test(
     "-DCOMPARE_MODULE=${CMAKE_CURRENT_SOURCE_DIR}/EelConsistencyCompare.cmake"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/test_eel_consistency_compare.cmake")
 
+add_test(
+  NAME eel_mpi_consistency_orchestration
+  COMMAND "${CMAKE_COMMAND}"
+    "-DORCHESTRATOR=${CMAKE_CURRENT_SOURCE_DIR}/test_eel_mpi_consistency.cmake"
+    "-DFAKE_PROBE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fake_eel_fixed_action_probe.cmake"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test_eel_mpi_consistency_orchestration.cmake")
+
 if(UNIX)
   add_test(
     NAME node3_scripts
@@ -227,6 +234,24 @@ if(BUILD_IBAMR_COUPLING)
   set_tests_properties(eel_fixed_action_probe PROPERTIES
     WORKING_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}"
     TIMEOUT 900)
+
+  add_test(
+    NAME eel_mpi_consistency
+    COMMAND "${CMAKE_COMMAND}"
+      "-DPROBE_EXECUTABLE=$<TARGET_FILE:frequency_response_probe>"
+      "-DMPIEXEC_EXECUTABLE=${MPIEXEC_EXECUTABLE}"
+      "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+      "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
+      "-DMPIEXEC_POSTFLAGS=${MPIEXEC_POSTFLAGS}"
+      "-DINPUT_FILE=${EEL_ENVIRONMENT_RUN_DIR}/input2d"
+      "-DVERTEX_FILE=${EEL_ENVIRONMENT_RUN_DIR}/eel2d.vertex"
+      "-DTASK_FILE=${EEL_ENVIRONMENT_RUN_DIR}/task.conf"
+      "-DCOMPARE_MODULE=${CMAKE_CURRENT_SOURCE_DIR}/EelConsistencyCompare.cmake"
+      "-DRUN_ROOT=${CMAKE_CURRENT_BINARY_DIR}/eel-mpi-consistency"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_eel_mpi_consistency.cmake")
+  set_tests_properties(eel_mpi_consistency PROPERTIES
+    LABELS "physical;node3"
+    TIMEOUT 2100)
 
   add_test(
     NAME eel_smoke_protocol
