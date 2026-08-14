@@ -41,6 +41,34 @@ The existing IBAMR-Smarties architecture contract remains binding.
 PyTorch, CUDA, pybind11, Python bindings, and neural-network algorithm changes
 are outside this stage.
 
+## Precision configuration prerequisite
+
+The current CMake logic does not honor `SINGLE_PRECISION` independently. It
+adds `-DSINGLE_PREC` only inside `if(COMPILE_PY_SO)`. Consequently the existing
+coupling configuration can report `SINGLE_PRECISION=ON` while
+`COMPILE_PY_SO=OFF` produces a double-precision `nnReal` build. A local Docker
+coupling build confirms this exact state: the cache contains
+`SINGLE_PRECISION=ON` and `COMPILE_PY_SO=OFF`, but the `libsmarties` compile
+definitions do not contain `SINGLE_PREC`.
+
+Before any learner result is admitted, the build option must be repaired at
+its source:
+
+- `SINGLE_PRECISION=ON` adds the `SINGLE_PREC` public compile definition to
+  `libsmarties` whether Python bindings are enabled or disabled;
+- `SINGLE_PRECISION=OFF` omits that definition;
+- `COMPILE_PY_SO` controls only Python-binding compilation and has no effect on
+  `nnReal` precision;
+- a compiled precision probe reports `sizeof(nnReal)==4` for the target
+  validation build and `sizeof(nnReal)==8` for the explicit double-precision
+  test build.
+
+The repair is a CMake option-semantics fix, not PyTorch work. All target
+consistency and convergence runs in this stage explicitly use
+`SINGLE_PRECISION=ON` and must archive the cache value, compile definition, and
+runtime precision-probe result. Historical coupling evidence is not
+retroactively relabeled as float32.
+
 ## Why the verification is layered
 
 Running convergence experiments directly on eel2d would mix neural-network
@@ -95,7 +123,7 @@ The probe builds the same small topology used by the eel policy dimensions:
 - two hidden layers of 16 units;
 - one continuous output;
 - Smarties' existing native CPU network and Adam optimizer;
-- the repository's default float32 neural-network precision.
+- the repaired and explicitly verified float32 neural-network precision.
 
 The fixture supplies fixed initial parameters, a fixed batch, a fixed target
 function, and a fixed update count. It must not use `std::random_device`.
@@ -234,8 +262,9 @@ swimming control.
 
 ## Tolerances and reproducibility
 
-The repository default neural-network precision is float32. Double-precision
-PETSc does not make the neural-network update double precision. Therefore:
+Target learner-validation builds explicitly select and verify float32
+`nnReal`. Double-precision PETSc does not make the neural-network update double
+precision. Therefore:
 
 - same-seed, same-thread deterministic micro-runs use exact audit digest
   equality as the primary reproducibility gate;
@@ -274,16 +303,18 @@ No failed or incomplete layer may be hidden by running a later layer.
 
 Verification proceeds in this order:
 
-1. compile and link the new probes against the exact Smarties runtime library;
-2. run focused deterministic network tests;
-3. run the three-seed synthetic matrix first with one thread, then four;
-4. independently compare archived audit and evaluation records;
-5. only after layers 1 and 2 pass, freeze the medium eel input, task, and
+1. prove the old precision-option failure, repair the CMake option semantics,
+   and verify both four-byte and eight-byte `nnReal` configurations;
+2. compile and link the new probes against the exact Smarties runtime library;
+3. run focused deterministic network tests;
+4. run the three-seed synthetic matrix first with one thread, then four;
+5. independently compare archived audit and evaluation records;
+6. only after layers 1 and 2 pass, freeze the medium eel input, task, and
    training files;
-6. run the single admitted eel learner-activity probe;
-7. verify checkpoint identity, process cleanup, source/build/runtime hashes,
+7. run the single admitted eel learner-activity probe;
+8. verify checkpoint identity, process cleanup, source/build/runtime hashes,
    and MPI ownership evidence;
-8. perform an independent evidence review.
+9. perform an independent evidence review.
 
 Every target run records the full Git revision, clean/dirty status, package and
 source-manifest hashes, compiler and library identities, random seeds,
@@ -297,6 +328,8 @@ admission requirements are fully satisfied.
 
 ## Deliverables
 
+- corrected `SINGLE_PRECISION` CMake semantics and four-byte/eight-byte
+  compiled precision tests;
 - a deterministic native-network update/checkpoint probe;
 - a full VRACER synthetic convergence environment and frozen settings;
 - opt-in machine-readable learner audit output;
