@@ -26,6 +26,10 @@ target_compile_definitions(learner_audit_options PRIVATE
   SMARTIES_LEARNER_APPROXIMATOR_SOURCE=\"${PROJECT_SOURCE_DIR}/source/smarties/Learners/Learner_approximator.cpp\")
 target_link_libraries(learner_audit_options PRIVATE libsmarties MPI::MPI_CXX)
 
+add_executable(cpu_learner_environment_test test_cpu_learner_environment.cpp)
+target_link_libraries(cpu_learner_environment_test PRIVATE
+  cpu_learner_environment_model)
+
 add_executable(borrowed_communicator_alias test_borrowed_communicator_alias.cpp)
 target_include_directories(borrowed_communicator_alias PRIVATE
   "${PROJECT_SOURCE_DIR}/source")
@@ -109,6 +113,42 @@ add_test(
   COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
           ${MPIEXEC_PREFLAGS} $<TARGET_FILE:learner_audit_options>
           ${MPIEXEC_POSTFLAGS})
+
+add_test(NAME cpu_learner_environment COMMAND cpu_learner_environment_test)
+
+if(UNIX)
+  set(CPU_LEARNER_PROTOCOL_RUN_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/cpu-learner-protocol")
+  file(MAKE_DIRECTORY "${CPU_LEARNER_PROTOCOL_RUN_DIR}")
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/cpu_learner_smoke.json"
+    "${CPU_LEARNER_PROTOCOL_RUN_DIR}/settings.json"
+    COPYONLY)
+  set(CPU_LEARNER_PROTOCOL_AUDIT_DIR
+    "${CPU_LEARNER_PROTOCOL_RUN_DIR}/audit")
+  add_test(
+    NAME cpu_learner_protocol
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+            ${MPIEXEC_PREFLAGS}
+            $<TARGET_FILE:smarties_cpu_learner_environment>
+            --nMasters 1
+            --nThreads 1
+            --nEnvironments 1
+            --workerProcessesPerEnv 1
+            --learnersOnWorkers 0
+            # With the smoke fixture's obsPerStep=32, the 32-step startup
+            # episode permits exactly two updates; step 33 triggers shutdown.
+            --nTrainSteps 33
+            --randSeed 11
+            --learnerAuditDir ${CPU_LEARNER_PROTOCOL_AUDIT_DIR}
+            --restart none
+            --redirectAppStdoutToFile 0
+            --syntheticProtocolCheck
+            ${MPIEXEC_POSTFLAGS})
+  set_tests_properties(cpu_learner_protocol PROPERTIES
+    WORKING_DIRECTORY "${CPU_LEARNER_PROTOCOL_RUN_DIR}"
+    TIMEOUT 120)
+endif()
 
 add_test(NAME mpi_session COMMAND mpi_session)
 
