@@ -8,6 +8,11 @@ target_compile_definitions(smarties_network_precision_probe PRIVATE
   SMARTIES_EXPECT_NNREAL_BYTES=${SMARTIES_EXPECT_NNREAL_BYTES})
 target_link_libraries(smarties_network_precision_probe PRIVATE libsmarties)
 
+add_executable(network_audit_test test_network_audit.cpp)
+target_include_directories(network_audit_test PRIVATE
+  "${PROJECT_SOURCE_DIR}/source")
+target_link_libraries(network_audit_test PRIVATE libsmarties)
+
 add_executable(borrowed_communicator_alias test_borrowed_communicator_alias.cpp)
 target_include_directories(borrowed_communicator_alias PRIVATE
   "${PROJECT_SOURCE_DIR}/source")
@@ -74,6 +79,8 @@ add_test(NAME owned_engine_shutdown COMMAND owned_engine_shutdown)
 
 add_test(NAME smarties_network_precision
   COMMAND smarties_network_precision_probe)
+
+add_test(NAME smarties_network_audit COMMAND network_audit_test)
 
 add_test(NAME mpi_session COMMAND mpi_session)
 

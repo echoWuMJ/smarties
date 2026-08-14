@@ -67,6 +67,7 @@ set(smarties_sources
     ${source_dir}/smarties/Network/Approximator.cpp
     ${source_dir}/smarties/Network/Builder.cpp
     ${source_dir}/smarties/Network/Network.cpp
+    ${source_dir}/smarties/Network/NetworkAudit.cpp
     ${source_dir}/smarties/Network/Optimizer.cpp
     ${source_dir}/smarties/Network/CMA_Optimizer.cpp
 )
@@ -74,6 +75,9 @@ set(smarties_sources
 set(smarties_core "libsmarties")
 add_library(${smarties_core} SHARED ${smarties_sources})
 set_property(TARGET ${smarties_core} PROPERTY PREFIX "") # remove the extra "lib" prefix
+set_source_files_properties(
+  ${source_dir}/smarties/Network/NetworkAudit.cpp
+  PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:GNU>:-Werror=array-bounds>")
 
 # compilation flags
 target_compile_features(${smarties_core} PUBLIC cxx_std_14)
