@@ -242,6 +242,26 @@ Optimizer(S,D,W), beta_1(beta1), beta_2(beta2), gradients(G) {
     printf("Optimizer: Parameter updates using Adam SGD algorithm.\n");
 }
 
+void AdamOptimizer::setStep(const Uint step)
+{
+  nStep = step;
+  beta_t_1 = beta_1;
+  beta_t_2 = beta_2;
+  for (Uint i = 0; i < step && (beta_t_1 != 0 || beta_t_2 != 0); ++i)
+  {
+    if (beta_t_1 != 0)
+    {
+      beta_t_1 *= beta_1;
+      if (beta_t_1 < nnEPS) beta_t_1 = 0;
+    }
+    if (beta_t_2 != 0)
+    {
+      beta_t_2 *= beta_2;
+      if (beta_t_2 < nnEPS) beta_t_2 = 0;
+    }
+  }
+}
+
 Optimizer::~Optimizer()
 {
   MPI_Comm* commptr = const_cast<MPI_Comm *>(&learnersComm);

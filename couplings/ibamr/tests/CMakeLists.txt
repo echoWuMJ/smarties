@@ -13,6 +13,12 @@ target_include_directories(network_audit_test PRIVATE
   "${PROJECT_SOURCE_DIR}/source")
 target_link_libraries(network_audit_test PRIVATE libsmarties)
 
+add_executable(smarties_network_update_probe network_update_probe.cpp)
+target_include_directories(smarties_network_update_probe PRIVATE
+  "${PROJECT_SOURCE_DIR}/source")
+target_link_libraries(smarties_network_update_probe PRIVATE
+  libsmarties MPI::MPI_CXX)
+
 add_executable(borrowed_communicator_alias test_borrowed_communicator_alias.cpp)
 target_include_directories(borrowed_communicator_alias PRIVATE
   "${PROJECT_SOURCE_DIR}/source")
@@ -81,6 +87,15 @@ add_test(NAME smarties_network_precision
   COMMAND smarties_network_precision_probe)
 
 add_test(NAME smarties_network_audit COMMAND network_audit_test)
+
+add_test(
+  NAME smarties_network_update_consistency
+  COMMAND "${CMAKE_COMMAND}"
+    "-DPROBE_EXECUTABLE=$<TARGET_FILE:smarties_network_update_probe>"
+    "-DCOMPARE_MODULE=${CMAKE_CURRENT_SOURCE_DIR}/NetworkAuditCompare.cmake"
+    "-DRUN_ROOT=${CMAKE_CURRENT_BINARY_DIR}/network-update-consistency"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test_network_update_consistency.cmake")
+set_tests_properties(smarties_network_update_consistency PROPERTIES TIMEOUT 300)
 
 add_test(NAME mpi_session COMMAND mpi_session)
 

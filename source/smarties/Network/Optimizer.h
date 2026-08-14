@@ -60,6 +60,7 @@ public:
                     const bool bBackup) = 0;
   virtual int restart(const NetLoadF_t& F,
                       const std::string fname) = 0;
+  virtual void setStep(const Uint step) { nStep = step; }
 
   virtual void prepare_update(const Rvec&L) = 0;
   virtual void apply_update() = 0;
@@ -106,6 +107,7 @@ public:
                 const std::vector<std::shared_ptr<Parameters>> & G,
                 const Real B1=.9, const Real B2=.999);
 
+  void setStep(const Uint step) override;
   void prepare_update(const Rvec& L) override;
   bool ready2UpdateWeights() override
   {

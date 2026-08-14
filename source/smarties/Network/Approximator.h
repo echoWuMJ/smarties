@@ -61,7 +61,7 @@ struct Approximator
     else if (build not_eq nullptr) return build->layers.size();
     else return 0;
   }
-  void setNgradSteps(const Uint iter) const { opt->nStep = iter; }
+  void setNgradSteps(const Uint iter) const { opt->setStep(iter); }
   void updateGradStats(const std::string& base, const Uint iter) const
   {
     gradStats->reduce_stats(base+"_"+name, iter);
