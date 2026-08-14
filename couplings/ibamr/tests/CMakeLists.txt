@@ -1,6 +1,13 @@
 add_executable(borrowed_engine_shutdown test_borrowed_engine_shutdown.cpp)
 target_link_libraries(borrowed_engine_shutdown PRIVATE libsmarties MPI::MPI_CXX)
 
+add_executable(smarties_network_precision_probe test_network_precision.cpp)
+target_include_directories(smarties_network_precision_probe PRIVATE
+  "${PROJECT_SOURCE_DIR}/source")
+target_compile_definitions(smarties_network_precision_probe PRIVATE
+  SMARTIES_EXPECT_NNREAL_BYTES=${SMARTIES_EXPECT_NNREAL_BYTES})
+target_link_libraries(smarties_network_precision_probe PRIVATE libsmarties)
+
 add_executable(borrowed_communicator_alias test_borrowed_communicator_alias.cpp)
 target_include_directories(borrowed_communicator_alias PRIVATE
   "${PROJECT_SOURCE_DIR}/source")
@@ -64,6 +71,9 @@ add_test(
           ${MPIEXEC_POSTFLAGS})
 
 add_test(NAME owned_engine_shutdown COMMAND owned_engine_shutdown)
+
+add_test(NAME smarties_network_precision
+  COMMAND smarties_network_precision_probe)
 
 add_test(NAME mpi_session COMMAND mpi_session)
 

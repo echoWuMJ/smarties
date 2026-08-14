@@ -93,8 +93,11 @@ target_compile_options(${smarties_core} PRIVATE
   $<$<CONFIG:Release>:-DNDEBUG;-O3;-ffast-math>
   )
 
-if (COMPILE_PY_SO)
-target_compile_options(${smarties_core} PUBLIC -DSINGLE_PREC)
+if(SINGLE_PRECISION)
+  target_compile_definitions(${smarties_core} PUBLIC SINGLE_PREC)
+  set(SMARTIES_EXPECT_NNREAL_BYTES 4)
+else()
+  set(SMARTIES_EXPECT_NNREAL_BYTES 8)
 endif()
 
 # include flags
