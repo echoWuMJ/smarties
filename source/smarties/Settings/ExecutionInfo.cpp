@@ -138,6 +138,9 @@ int ExecutionInfo::parse()
   parser.add_option("--restart", restart,
     "Prefix of net save files. If 'none' then no restart."
   );
+  parser.add_option("--learnerAuditDir", learnerAuditDir,
+    "Absolute directory for opt-in native learner audit and checkpoints."
+  );
 
   parser.add_option("--learnersOnWorkers", learnersOnWorkers,
     "Whether to enable hosting learning algos on worker processes such that "
@@ -165,6 +168,15 @@ int ExecutionInfo::parse()
       return 1;
     }
     else return 1;
+  }
+
+  const bool invalidAuditDirectory = learnerAuditDir.empty() ||
+    (learnerAuditDir != "none" && learnerAuditDir.front() != '/');
+  if(invalidAuditDirectory) {
+    if(world_rank == 0)
+      fprintf(stderr, "--learnerAuditDir must be 'none' or an absolute path.\n");
+    MPI_Barrier(world_comm);
+    return 1;
   }
   MPI_Barrier(world_comm);
   return 0;

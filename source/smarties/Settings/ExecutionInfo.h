@@ -74,6 +74,7 @@ struct ExecutionInfo
   std::string appSettings = "";
   std::string setupFolder = "";
   std::string restart = ".";
+  std::string learnerAuditDir = "none";
 
   bool bTrain = true;
   int logAllSamples = 1;

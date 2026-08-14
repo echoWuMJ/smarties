@@ -69,6 +69,7 @@ void Learner::initializeLearner()
   // placed here because on 1st step we just computed first rewards statistics
   MemoryProcessing::rescaleAllReturnEstimator(* data.get());
   profiler->stop();
+  onTrainingInitialized();
 }
 
 void Learner::processMemoryBuffer()

@@ -10,12 +10,38 @@
 
 #include "../Network/Approximator.h"
 #include "../Network/Builder.h"
+#include "../Network/NetworkAudit.h"
 #include "../Utils/ParameterBlob.h"
 
+#include <cerrno>
 #include <chrono>
+#include <fstream>
+#include <sys/stat.h>
 
 namespace smarties
 {
+
+namespace
+{
+void createDirectoriesAbsolute(const std::string& path)
+{
+  if(path.empty() || path.front() != '/')
+    die("Learner audit directory must be absolute.");
+
+  for(std::size_t pos=1; pos<=path.size(); ++pos)
+  {
+    if(pos < path.size() && path[pos] != '/') continue;
+    const std::string directory = path.substr(0, pos);
+    if(directory.empty()) continue;
+    if(mkdir(directory.c_str(), S_IRWXU | S_IRWXG) == 0) continue;
+
+    struct stat info;
+    if(errno == EEXIST && stat(directory.c_str(), &info) == 0 &&
+       S_ISDIR(info.st_mode)) continue;
+    _die("Failed to create learner audit directory %s.", directory.c_str());
+  }
+}
+} // namespace
 
 Learner_approximator::Learner_approximator(MDPdescriptor& MDP_,
                                            HyperParameters& S_,
@@ -100,8 +126,66 @@ void Learner_approximator::applyGradient()
 {
   profiler->start("GRAD");
   debugL("Apply SGD update");
-  for(const auto & net : networks) net->applyUpdate();
+  for(Uint networkID=0; networkID<networks.size(); ++networkID) {
+    networks[networkID]->applyUpdate();
+    emitNetworkAudit("update", networkID);
+  }
   profiler->stop();
+}
+
+void Learner_approximator::emitNetworkAudit(const std::string& stage,
+                                            const Uint networkID) const
+{
+  if(distrib.learnerAuditDir == "none") return;
+  if(learn_rank != 0) return;
+  if(networkID >= networks.size()) die("Invalid network audit index.");
+
+  createDirectoriesAbsolute(distrib.learnerAuditDir);
+  std::ofstream output(distrib.learnerAuditDir + "/learner_audit.log",
+                       std::ios::out | std::ios::app);
+  if(!output) die("Failed to open learner audit log.");
+
+  Optimizer* const optimizer = networks[networkID]->getOptimizerPtr();
+  const ParameterAudit audit = auditParameters(*optimizer->getWeights(0));
+  output << formatParameterAudit(stage,
+                                 learner_name + "_network" +
+                                   std::to_string(networkID),
+                                 optimizer->nStep, nThreads, audit)
+         << '\n';
+  if(!output) die("Failed to write learner audit log.");
+}
+
+void Learner_approximator::saveAuditCheckpoint(const std::string& stage) const
+{
+  if(distrib.learnerAuditDir == "none") return;
+  if(learn_rank != 0) return;
+
+  const std::string directory = distrib.learnerAuditDir + "/" + stage;
+  createDirectoriesAbsolute(directory);
+  const std::string base = directory + "/" + learner_name;
+  for(const auto& net : networks) net->save(base, false);
+  data->save(base);
+}
+
+void Learner_approximator::onTrainingInitialized()
+{
+  for(Uint networkID=0; networkID<networks.size(); ++networkID)
+    emitNetworkAudit("initialized", networkID);
+  saveAuditCheckpoint("initial");
+}
+
+void Learner_approximator::onTrainingFinalized()
+{
+  for(Uint networkID=0; networkID<networks.size(); ++networkID)
+  {
+    const unsigned long optimizerStep =
+      networks[networkID]->getOptimizerPtr()->nStep;
+    if(optimizerStep != static_cast<unsigned long>(nGradSteps()))
+      _die("Learner audit step mismatch: optimizer=%lu memory=%ld.",
+           optimizerStep, nGradSteps());
+    emitNetworkAudit("final", networkID);
+  }
+  saveAuditCheckpoint("final");
 }
 
 void Learner_approximator::getMetrics(std::ostringstream& buf) const
@@ -127,7 +211,10 @@ void Learner_approximator::restart()
 
   Learner::restart();
 
-  for(const auto & net : networks) net->setNgradSteps(nGradSteps());
+  for(Uint networkID=0; networkID<networks.size(); ++networkID) {
+    networks[networkID]->setNgradSteps(nGradSteps());
+    emitNetworkAudit("restart", networkID);
+  }
 }
 
 void Learner_approximator::save()

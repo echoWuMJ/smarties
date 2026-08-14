@@ -19,6 +19,13 @@ target_include_directories(smarties_network_update_probe PRIVATE
 target_link_libraries(smarties_network_update_probe PRIVATE
   libsmarties MPI::MPI_CXX)
 
+add_executable(learner_audit_options test_learner_audit_options.cpp)
+target_include_directories(learner_audit_options PRIVATE
+  "${PROJECT_SOURCE_DIR}/source")
+target_compile_definitions(learner_audit_options PRIVATE
+  SMARTIES_LEARNER_APPROXIMATOR_SOURCE=\"${PROJECT_SOURCE_DIR}/source/smarties/Learners/Learner_approximator.cpp\")
+target_link_libraries(learner_audit_options PRIVATE libsmarties MPI::MPI_CXX)
+
 add_executable(borrowed_communicator_alias test_borrowed_communicator_alias.cpp)
 target_include_directories(borrowed_communicator_alias PRIVATE
   "${PROJECT_SOURCE_DIR}/source")
@@ -96,6 +103,12 @@ add_test(
     "-DRUN_ROOT=${CMAKE_CURRENT_BINARY_DIR}/network-update-consistency"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/test_network_update_consistency.cmake")
 set_tests_properties(smarties_network_update_consistency PROPERTIES TIMEOUT 300)
+
+add_test(
+  NAME learner_audit_options
+  COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
+          ${MPIEXEC_PREFLAGS} $<TARGET_FILE:learner_audit_options>
+          ${MPIEXEC_POSTFLAGS})
 
 add_test(NAME mpi_session COMMAND mpi_session)
 

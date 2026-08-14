@@ -66,6 +66,8 @@ protected:
   mutable std::mutex buffer_mutex;
 
   virtual void processStats(const bool bPrintHeader);
+  virtual void onTrainingInitialized() {}
+  virtual void onTrainingFinalized() {}
 
 public:
   std::string learner_name;
@@ -119,6 +121,8 @@ public:
 
   virtual void save();
   virtual void restart();
+
+  void finalizeTraining() { onTrainingFinalized(); }
 };
 
 }

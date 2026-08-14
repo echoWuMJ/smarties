@@ -139,6 +139,7 @@ void Worker::runTraining()
   // kill data gathering process
   bDataCoordRunning = 0;
   dataCoordProcess.join();
+  for(auto& learner : learners) learner->finalizeTraining();
 }
 
 void Worker::answerStateAction(Agent& agent) const

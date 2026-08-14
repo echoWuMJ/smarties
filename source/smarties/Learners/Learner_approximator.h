@@ -30,6 +30,11 @@ class Learner_approximator: public Learner
   virtual void prepareCMALoss();
 
   virtual void applyGradient();
+  virtual void onTrainingInitialized() override;
+  virtual void onTrainingFinalized() override;
+
+  void emitNetworkAudit(const std::string& stage, const Uint networkID) const;
+  void saveAuditCheckpoint(const std::string& stage) const;
 
  public:
   Learner_approximator(MDPdescriptor&, HyperParameters&, ExecutionInfo&);
