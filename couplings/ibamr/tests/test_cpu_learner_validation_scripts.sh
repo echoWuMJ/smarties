@@ -74,6 +74,8 @@ run_case()
 }
 
 one_valid=$(run_case valid 1 PASS 0)
+run_case partial_summary 1 PASS 0 >/dev/null
+run_case prefixed_overshoot 1 PASS 0 >/dev/null
 run_case unchanged 1 NO_SYNTHETIC_CONVERGENCE 1 >/dev/null
 run_case nonfinite 1 NONFINITE_UPDATE 1 >/dev/null
 run_case missing_update 1 UPDATE_NOT_OBSERVED 1 >/dev/null
@@ -152,8 +154,23 @@ set -e
   fail "invalid batch/thread combination was not rejected: $bad_output"
 
 valid_log=$(<"$fixture/valid-1.log")
-[[ $valid_log == *"--bind-to core --map-by slot:PE=4 -n 5"* ]] ||
-  fail "missing frozen CPU binding command: $valid_log"
+training_topology_count=$(grep -c -- \
+  '--bind-to core --map-by slot:PE=4 -n 5 .*--nEnvironments 4' \
+  "$fixture/valid-1.log" || true)
+evaluation_topology_count=$(grep -c -- \
+  '--bind-to core --map-by slot:PE=4 -n 2 .*--nEnvironments 1' \
+  "$fixture/valid-1.log" || true)
+[[ $training_topology_count -eq 1 ]] ||
+  fail "training did not use one learner plus four environments: $valid_log"
+[[ $evaluation_topology_count -eq 2 ]] ||
+  fail "both evaluations did not use one learner plus one environment: $valid_log"
+for expected_manifest_line in \
+  training_mpi_ranks=5 evaluation_mpi_ranks=2 \
+  training_environments=4 evaluation_environments=1 \
+  training_logical_cpus=20 evaluation_logical_cpus=8; do
+  grep -Fqx "$expected_manifest_line" "$one_valid/run_manifest.txt" ||
+    fail "run manifest is missing $expected_manifest_line"
+done
 [[ $valid_log == *"--nTrainUpdates 8"* ]] ||
   fail "training command does not request exactly eight optimizer updates: $valid_log"
 [[ $valid_log != *"--nTrainSteps 8"* ]] ||

@@ -197,12 +197,16 @@ Run one admitted target at a time from an immutable source/build pair:
   --training couplings/ibamr/configs/training/cpu_learner_convergence.json
 ```
 
-Both commands use five MPI ranks with `--bind-to core --map-by slot:PE=4`:
-one learner plus four environments, reserving 20 logical CPUs. The four-thread
+Training uses five MPI ranks with `--bind-to core --map-by slot:PE=4`: one
+learner plus four environments, reserving 20 logical CPUs. Each checkpoint
+evaluation uses two MPI ranks (one learner plus one environment), reserving 8
+logical CPUs. Metrics use the first eight completed episodes (exactly 256
+decisions) and exclude any later in-flight work observed before the Smarties
+stop signal reaches the environment. The two-thread
 configuration changes only native Smarties/OpenMP learner computation; it does
-not enable a Python, PyTorch, CUDA, or pybind11 backend. The full node3 target
-matrix repeats both thread counts for seeds 11, 29, and 47, then compares each
-four-thread result with its one-thread counterpart. It is an explicit
+not enable a Python, PyTorch, CUDA, or pybind11 backend. The current node3
+target matrix runs thread counts 1 and 2 for seeds 11 and 29, then compares
+each two-thread result with its one-thread counterpart. It is an explicit
 `node3;learner;convergence` gate and is intentionally not part of ordinary
 CTest. Ordinary CTest runs only the fast fake-executable classification test
 `cpu_learner_validation_scripts`.

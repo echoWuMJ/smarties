@@ -108,7 +108,10 @@ Tests are added before production changes.
 6. After focused tests pass, the frozen node3 CPU matrix runs seeds 11 and 29
    with one and two learner threads, exactly 1024 updates per training run,
    finite audit records, parameter movement, checkpoint reload, and bounded
-   initial/final evaluation.
+   initial/final evaluation. Training uses four parallel environments, while
+   each evaluation uses one environment and computes metrics from its first
+   eight completed episodes (exactly 256 deterministic decisions), excluding
+   any later in-flight work before the stop signal arrives.
 
 No result is promoted to `experience/verified/` until the full matrix and its
 independent evidence review pass.

@@ -58,7 +58,24 @@ else
   printf 'SMARTIES_NETWORK_AUDIT stage=restart network=agent_00_network0 step=0 threads=%s precision_bytes=4 params=544 digest=%s sum=0 sum_squares=0 max_abs=1 finite=1\n' "$threads" "$digest" >"$audit_dir/learner_audit.log"
   output_seed=$seed
   [[ $scenario == wrong_seed ]] && output_seed=$((seed + 1))
-  printf 'SMARTIES_SYNTHETIC_SUMMARY seed=%s environment=1 episodes=8 decisions=256 mean_return=%s action_mse=%s finite=1\n' "$output_seed" "$mean_return" "$mse"
+  episode_limit=8
+  [[ $scenario == prefixed_overshoot ]] && episode_limit=9
+  for ((episode=1; episode<=episode_limit; ++episode)); do
+    if [[ $scenario == prefixed_overshoot ]]; then
+      printf '\rCollected %s environment episodes out of 8. ' "$episode"
+    fi
+    printf 'SMARTIES_SYNTHETIC_EPISODE seed=%s environment=1 episode=%s decisions=32 return=%s mse=%s finite=1\n' \
+      "$output_seed" "$episode" "$mean_return" "$mse"
+  done
+  if [[ $scenario == prefixed_overshoot ]]; then
+    summary_decisions=288
+  elif [[ $scenario == partial_summary ]]; then
+    summary_decisions=286
+  else
+    summary_decisions=256
+  fi
+  printf 'SMARTIES_SYNTHETIC_SUMMARY seed=%s environment=1 episodes=8 decisions=%s mean_return=%s action_mse=%s finite=1\n' \
+    "$output_seed" "$summary_decisions" "$mean_return" "$mse"
 fi
 
 printf 'COUPLING_DRIVER_RETURNED_MPI_ACTIVE\n'

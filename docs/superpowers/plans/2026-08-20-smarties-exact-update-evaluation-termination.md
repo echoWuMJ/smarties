@@ -92,7 +92,8 @@ OpenMP, MPI/Open MPI, CMake/CTest, Bash, node3 coupling build.
       `COMPILE_PY_SO=OFF`; build only required targets.
 - [ ] Run focused nonphysical tests before target simulations.
 - [ ] Run the frozen synthetic matrix for seeds 11 and 29, thread counts 1 and
-      2, and exactly 1024 updates; do not rerun an admitted target.
+      2, and exactly 1024 updates; train with four environments and evaluate
+      with one environment; do not rerun an admitted target.
 - [ ] Verify finite updates, exact counts, parameter movement, same-setting
       repeatability, bounded checkpoint evaluation, and no scoped residuals.
 - [ ] Keep eel2d and experience admission gated until the synthetic matrix

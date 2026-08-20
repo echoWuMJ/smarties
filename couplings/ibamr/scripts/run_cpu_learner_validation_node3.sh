@@ -122,9 +122,13 @@ threads=$threads
 seed=$seed
 updates=$updates
 batch_size=$batch_size
-mpi_ranks=5
+training_mpi_ranks=5
+evaluation_mpi_ranks=2
+training_environments=4
+evaluation_environments=1
 processing_elements_per_rank=4
-logical_cpus=20
+training_logical_cpus=20
+evaluation_logical_cpus=8
 omp_dynamic=FALSE
 omp_proc_bind=close
 omp_places=cores
@@ -172,11 +176,18 @@ launch_stage()
 {
   local stage=$1 restart=$2
   local directory="$run_dir/$stage" audit="$run_dir/$stage/audit"
+  local mpi_ranks=5 environments=4
+  if [[ $restart != none ]]; then
+    mpi_ranks=2
+    environments=1
+  fi
   mkdir -p "$directory"
   cp "$training" "$directory/settings.json"
-  local command=("$mpiexec_command" --bind-to core --map-by slot:PE=4 -n 5
+  local command=("$mpiexec_command" --bind-to core --map-by slot:PE=4
+    -n "$mpi_ranks"
     "$executable" --nMasters 1 --nThreads "$threads"
-    --nEnvironments 4 --workerProcessesPerEnv 1 --learnersOnWorkers 0
+    --nEnvironments "$environments" --workerProcessesPerEnv 1
+    --learnersOnWorkers 0
     --randSeed "$seed" --learnerAuditDir "$audit"
     --redirectAppStdoutToFile 0)
   if [[ $restart == none ]]; then
@@ -218,27 +229,26 @@ write_metrics()
       }
       return ""
     }
-    /^SMARTIES_SYNTHETIC_SUMMARY / {
+    /SMARTIES_SYNTHETIC_EPISODE / {
+      if(seen >= 8) next
       seen++
       record_seed=value("seed")
-      record_episodes=value("episodes") + 0
       record_decisions=value("decisions") + 0
-      record_return=value("mean_return") + 0
-      record_mse=value("action_mse") + 0
+      record_return=value("return") + 0
+      record_mse=value("mse") + 0
       if(record_seed != expected_seed || value("finite") != "1" ||
-         record_episodes <= 0 || record_decisions <= 0) valid=0
-      episodes += record_episodes
+         record_decisions <= 0) valid=0
       decisions += record_decisions
-      return_sum += record_return * record_episodes
+      return_sum += record_return
       squared_error += record_mse * record_decisions
     }
     BEGIN { valid=1 }
     END {
-      if(seen < 1 || !valid || decisions != 256 || episodes < 1) exit 2
-      printf "CPU_LEARNER_METRICS seed=%s episodes=%d decisions=%d mean_return=%.17g action_mse=%.17g finite=1\n", expected_seed, episodes, decisions, return_sum/episodes, squared_error/decisions
+      if(seen != 8 || !valid || decisions != 256) exit 2
+      printf "CPU_LEARNER_METRICS seed=%s episodes=%d decisions=%d mean_return=%.17g action_mse=%.17g finite=1\n", expected_seed, seen, decisions, return_sum/seen, squared_error/decisions
     }
   ' "$stdout_log" >"$metrics"; then
-    die "evaluation summary is missing, malformed, non-finite, wrong-seed, or not 256 decisions"
+    die "completed evaluation episodes are missing, malformed, non-finite, wrong-seed, or not exactly eight episodes and 256 decisions"
   fi
 }
 
