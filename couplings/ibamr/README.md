@@ -171,6 +171,14 @@ evaluates both checkpoints on exactly 256 deterministic decisions. It requires
 reduction in action MSE, and at least half of the return gap to zero to be
 closed.
 
+The runner's `--updates` value is passed to Smarties as `--nTrainUpdates`, not
+`--nTrainSteps`. It therefore means an exact number of additional native
+optimizer updates in the current invocation, including after restart.
+`--nTrainSteps` retains its original environment-transition meaning for legacy
+Smarties applications. Evaluation similarly counts only episodes completed in
+the current restarted invocation; checkpoint history does not consume the
+`--nEvalEpisodes` budget, and evaluation transitions remain outside replay.
+
 Run one admitted target at a time from an immutable source/build pair:
 
 ```bash

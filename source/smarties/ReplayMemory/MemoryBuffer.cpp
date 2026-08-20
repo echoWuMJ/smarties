@@ -58,9 +58,11 @@ void MemoryBuffer::storeState(Agent&a)
     // contain only one state and do not add more. to not store rewards either
     // RNNs then become automatically not supported because no time series!
     // (this is accompained by check in approximator)
+    const bool completedEpisode = a.agentStatus >= LAST;
     S.states  = std::vector<Fvec>{ storedState };
     S.rewards = std::vector<Real>{ (Real) 0 };
     S.clearNonTrackedAgent();
+    if(completedEpisode) increaseLocalSeenEps();
     a.agentStatus = INIT; // one state stored, lie to avoid catching asserts
     return;
   }

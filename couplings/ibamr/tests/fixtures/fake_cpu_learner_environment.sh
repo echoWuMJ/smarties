@@ -14,7 +14,7 @@ while (($#)); do
     --restart) restart=$2; shift 2 ;;
     --randSeed) seed=$2; shift 2 ;;
     --nThreads) threads=$2; shift 2 ;;
-    --nTrainSteps) updates=$2; shift 2 ;;
+    --nTrainSteps|--nTrainUpdates) updates=$2; shift 2 ;;
     *) shift ;;
   esac
 done

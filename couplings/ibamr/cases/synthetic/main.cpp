@@ -248,6 +248,8 @@ int main(int argc, char** argv)
   }
 
   const bool protocol_check = hasFlag(argc, argv, "--syntheticProtocolCheck");
+  const bool evaluation_check =
+    optionValue(argc, argv, "--nEvalEpisodes", "0") != "0";
   const std::string audit_directory =
     optionValue(argc, argv, "--learnerAuditDir", "none");
   if(protocol_check && audit_directory == "none")
@@ -301,8 +303,11 @@ int main(int argc, char** argv)
           directoryEntryCount(audit_directory + "/initial");
         const unsigned final_files =
           directoryEntryCount(audit_directory + "/final");
-        if(updates != 2 || initialized < 1 || final < 1 ||
-           terminal_workers < 1 || initial_files == 0 || final_files == 0)
+        const bool training_failure = !evaluation_check &&
+          (updates != 2 || initialized < 1 || final < 1 ||
+           initial_files == 0 || final_files == 0);
+        const bool evaluation_failure = evaluation_check && updates != 0;
+        if(training_failure || evaluation_failure || terminal_workers < 1)
           result = 96;
         std::printf("SMARTIES_SYNTHETIC_PROTOCOL_CHECK updates=%ld "
                     "initialized=%ld final=%ld terminal_workers=%d "

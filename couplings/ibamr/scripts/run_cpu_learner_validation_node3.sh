@@ -32,7 +32,8 @@ done
    -n $seed && -n $updates && -n $training ]] || die "all runner arguments are required"
 [[ $source_dir == /* && $build_dir == /* && $run_root == /* ]] ||
   die "source, build, and run-root must be absolute"
-[[ $threads == 1 || $threads == 4 ]] || die "threads must be 1 or 4"
+[[ $threads == 1 || $threads == 2 || $threads == 4 ]] ||
+  die "threads must be 1, 2, or 4"
 [[ $seed =~ ^[1-9][0-9]*$ ]] || die "seed must be a positive integer"
 [[ $updates =~ ^[1-9][0-9]*$ ]] || die "updates must be a positive integer"
 [[ -d $source_dir && -f $source_dir/CMakeLists.txt ]] || die "source tree is missing"
@@ -179,7 +180,7 @@ launch_stage()
     --randSeed "$seed" --learnerAuditDir "$audit"
     --redirectAppStdoutToFile 0)
   if [[ $restart == none ]]; then
-    command+=(--nTrainSteps "$updates" --restart none)
+    command+=(--nTrainUpdates "$updates" --restart none)
   else
     command+=(--nTrainSteps 0 --nEvalEpisodes 8 --restart "$restart")
   fi

@@ -68,6 +68,7 @@ struct ExecutionInfo
   Uint workerProcessesPerEnv = 1;
   Uint randSeed = 0;
   Uint nTrainSteps = 10000000; // if training: total number of env time steps
+  Uint nTrainUpdates = 0; // if >0: additional optimizer updates this run
   Uint nEvalEpisodes = 0; // if not training: number of episode to evaluate on
 
   std::string nStepPappSett = "0";

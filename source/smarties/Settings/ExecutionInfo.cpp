@@ -115,6 +115,10 @@ int ExecutionInfo::parse()
   parser.add_option("--nTrainSteps", nTrainSteps,
     "Total number of time steps before end of training."
   );
+  parser.add_option("--nTrainUpdates", nTrainUpdates,
+    "Exact number of additional optimizer updates before end of training. "
+    "If positive, this replaces --nTrainSteps as the termination condition."
+  );
   parser.add_option("--nEvalEpisodes", nEvalEpisodes,
     "Total number of episodes to evaluate training policy. "
     "If >0, training is DISABLED and network parameters frozen."

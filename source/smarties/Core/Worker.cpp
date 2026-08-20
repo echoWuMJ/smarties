@@ -54,6 +54,17 @@ void Worker::runTraining()
 {
 
   const int learn_rank = MPICommRank(learners_train_comm);
+  std::vector<long> gradientBaselines;
+  std::vector<long> evaluationBaselines;
+  gradientBaselines.reserve(learners.size());
+  evaluationBaselines.reserve(learners.size());
+  for(const auto& learner : learners) {
+    gradientBaselines.push_back(learner->nGradSteps());
+    evaluationBaselines.push_back(learner->nSeqsEval());
+  }
+  if(distrib.nTrainUpdates > 0 && learn_rank == 0)
+    printf("Training termination mode: %lu additional optimizer updates.\n",
+           (unsigned long) distrib.nTrainUpdates);
   //////////////////////////////////////////////////////////////////////////////
   ////// FIRST SETUP SIMPLE FUNCTIONS TO DETECT START AND END OF TRAINING //////
   //////////////////////////////////////////////////////////////////////////////
@@ -83,6 +94,12 @@ void Worker::runTraining()
     if(isTrainingStarted==0) return false;
 
     bool over = true;
+    if(distrib.nTrainUpdates > 0) {
+      for(Uint i=0; i<learners.size(); ++i)
+        over = over && learners[i]->nGradSteps() - gradientBaselines[i]
+                       >= (long) distrib.nTrainUpdates;
+      return over;
+    }
     const Real factor = learners.size()==1? 1.0/ENV.nAgentsPerEnvironment : 1;
     for(const auto& L : learners)
       over = over && L->nLocTimeStepsTrain() * factor >= distrib.nTrainSteps;
@@ -94,8 +111,9 @@ void Worker::runTraining()
     // instead of sum of timesteps performed by each agent
     const long factor = learners.size()==1? ENV.nAgentsPerEnvironment : 1;
     long nEnvSeqs = std::numeric_limits<long>::max();
-    for(const auto& L : learners)
-      nEnvSeqs = std::min(nEnvSeqs, L->nSeqsEval() / factor);
+    for(Uint i=0; i<learners.size(); ++i)
+      nEnvSeqs = std::min(nEnvSeqs,
+        (learners[i]->nSeqsEval() - evaluationBaselines[i]) / factor);
     const Real perc = 100.0 * nEnvSeqs / (Real) distrib.nEvalEpisodes;
     if(nEnvSeqs >= (long) distrib.nEvalEpisodes) {
       printf("\rFinished collecting %d environment episodes (option " \

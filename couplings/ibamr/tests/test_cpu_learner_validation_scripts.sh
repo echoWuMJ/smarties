@@ -154,6 +154,10 @@ set -e
 valid_log=$(<"$fixture/valid-1.log")
 [[ $valid_log == *"--bind-to core --map-by slot:PE=4 -n 5"* ]] ||
   fail "missing frozen CPU binding command: $valid_log"
+[[ $valid_log == *"--nTrainUpdates 8"* ]] ||
+  fail "training command does not request exactly eight optimizer updates: $valid_log"
+[[ $valid_log != *"--nTrainSteps 8"* ]] ||
+  fail "training command still treats transition steps as optimizer updates: $valid_log"
 if grep -Eiq 'pytorch|torch|cuda|pybind' "$fixture/valid-1.log"; then
   fail "forbidden backend token in runner output"
 fi

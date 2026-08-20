@@ -119,35 +119,32 @@ add_test(NAME cpu_learner_environment COMMAND cpu_learner_environment_test)
 if(UNIX)
   set(CPU_LEARNER_PROTOCOL_RUN_DIR
     "${CMAKE_CURRENT_BINARY_DIR}/cpu-learner-protocol")
-  file(MAKE_DIRECTORY "${CPU_LEARNER_PROTOCOL_RUN_DIR}")
-  configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/cpu_learner_smoke.json"
-    "${CPU_LEARNER_PROTOCOL_RUN_DIR}/settings.json"
-    COPYONLY)
-  set(CPU_LEARNER_PROTOCOL_AUDIT_DIR
-    "${CPU_LEARNER_PROTOCOL_RUN_DIR}/audit")
   add_test(
     NAME cpu_learner_protocol
-    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
-            ${MPIEXEC_PREFLAGS}
-            $<TARGET_FILE:smarties_cpu_learner_environment>
-            --nMasters 1
-            --nThreads 1
-            --nEnvironments 1
-            --workerProcessesPerEnv 1
-            --learnersOnWorkers 0
-            # With the smoke fixture's obsPerStep=32, the 32-step startup
-            # episode permits exactly two updates; step 33 triggers shutdown.
-            --nTrainSteps 33
-            --randSeed 11
-            --learnerAuditDir ${CPU_LEARNER_PROTOCOL_AUDIT_DIR}
-            --restart none
-            --redirectAppStdoutToFile 0
-            --syntheticProtocolCheck
-            ${MPIEXEC_POSTFLAGS})
+    COMMAND "${CMAKE_COMMAND}"
+      "-DMPIEXEC_EXECUTABLE=${MPIEXEC_EXECUTABLE}"
+      "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+      "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
+      "-DMPIEXEC_POSTFLAGS=${MPIEXEC_POSTFLAGS}"
+      "-DPROBE_EXECUTABLE=$<TARGET_FILE:smarties_cpu_learner_environment>"
+      "-DSETTINGS_FILE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/cpu_learner_smoke.json"
+      "-DRUN_ROOT=${CPU_LEARNER_PROTOCOL_RUN_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_exact_train_updates.cmake")
   set_tests_properties(cpu_learner_protocol PROPERTIES
-    WORKING_DIRECTORY "${CPU_LEARNER_PROTOCOL_RUN_DIR}"
     TIMEOUT 120)
+
+  add_test(
+    NAME cpu_learner_evaluation
+    COMMAND "${CMAKE_COMMAND}"
+      "-DMPIEXEC_EXECUTABLE=${MPIEXEC_EXECUTABLE}"
+      "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+      "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
+      "-DMPIEXEC_POSTFLAGS=${MPIEXEC_POSTFLAGS}"
+      "-DPROBE_EXECUTABLE=$<TARGET_FILE:smarties_cpu_learner_environment>"
+      "-DSETTINGS_FILE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/cpu_learner_smoke.json"
+      "-DRUN_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cpu-learner-evaluation"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_cpu_learner_evaluation.cmake")
+  set_tests_properties(cpu_learner_evaluation PROPERTIES TIMEOUT 75)
 endif()
 
 add_test(NAME mpi_session COMMAND mpi_session)

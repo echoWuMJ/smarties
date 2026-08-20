@@ -55,6 +55,11 @@ void Engine::setNumTrainingTimeSteps(const Uint numSteps) {
   distrib->bTrain = 1;
 }
 
+void Engine::setNumTrainingGradientSteps(const Uint numUpdates) {
+  distrib->nTrainUpdates = numUpdates;
+  distrib->bTrain = 1;
+}
+
 void Engine::setNumEvaluationEpisodes(const Uint numEpisodes) {
   distrib->nEvalEpisodes = numEpisodes;
   distrib->bTrain = 0;

@@ -56,6 +56,8 @@ public:
 
   VISIBLE void setNumTrainingTimeSteps(const Uint numSteps);
 
+  VISIBLE void setNumTrainingGradientSteps(const Uint numUpdates);
+
   VISIBLE void setNumEvaluationEpisodes(const Uint numEpisodes);
 
   VISIBLE void setSimulationArgumentsFilePath(const std::string& appSettings);
