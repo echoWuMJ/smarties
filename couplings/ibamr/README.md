@@ -160,6 +160,49 @@ evidence-review admission matrix.
 
 ## Tests
 
+### Native CPU learner convergence validation
+
+`smarties_cpu_learner_environment` provides a deterministic five-state,
+one-action analytic task for validating the production VRACER CPU learner.
+The frozen validation trains one learner rank against four single-rank
+synthetic environments, saves explicit initial/final audit checkpoints, and
+evaluates both checkpoints on exactly 256 deterministic decisions. It requires
+1024 finite optimizer updates, matching restart digests, at least a 50 percent
+reduction in action MSE, and at least half of the return gap to zero to be
+closed.
+
+Run one admitted target at a time from an immutable source/build pair:
+
+```bash
+./couplings/ibamr/scripts/run_cpu_learner_validation_node3.sh \
+  --source /data2/mjwu/local/coupling-src/<snapshot> \
+  --build /data2/mjwu/local/coupling-build/<snapshot> \
+  --run-root /data2/mjwu/local/coupling-runs/cpu-learner-seed11-t1 \
+  --threads 1 --seed 11 --updates 1024 \
+  --training couplings/ibamr/configs/training/cpu_learner_convergence.json
+
+./couplings/ibamr/scripts/run_cpu_learner_validation_node3.sh \
+  --source /data2/mjwu/local/coupling-src/<snapshot> \
+  --build /data2/mjwu/local/coupling-build/<snapshot> \
+  --run-root /data2/mjwu/local/coupling-runs/cpu-learner-seed11-t4 \
+  --threads 4 --seed 11 --updates 1024 \
+  --training couplings/ibamr/configs/training/cpu_learner_convergence.json
+```
+
+Both commands use five MPI ranks with `--bind-to core --map-by slot:PE=4`:
+one learner plus four environments, reserving 20 logical CPUs. The four-thread
+configuration changes only native Smarties/OpenMP learner computation; it does
+not enable a Python, PyTorch, CUDA, or pybind11 backend. The full node3 target
+matrix repeats both thread counts for seeds 11, 29, and 47, then compares each
+four-thread result with its one-thread counterpart. It is an explicit
+`node3;learner;convergence` gate and is intentionally not part of ordinary
+CTest. Ordinary CTest runs only the fast fake-executable classification test
+`cpu_learner_validation_scripts`.
+
+This gate establishes native Smarties CPU update, checkpoint-restart, and
+analytic-task convergence behavior. It does not establish eel policy quality,
+eel convergence, swimming efficiency, or long-horizon IBAMR stability.
+
 ### One-rank/two-rank physical consistency gate
 
 On the configured node3 build, select the focused gate with:

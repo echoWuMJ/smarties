@@ -181,6 +181,13 @@ add_test(
 
 if(UNIX)
   add_test(
+    NAME cpu_learner_validation_scripts
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test_cpu_learner_validation_scripts.sh")
+  set_tests_properties(cpu_learner_validation_scripts PROPERTIES
+    LABELS "fast;learner"
+    TIMEOUT 30)
+
+  add_test(
     NAME node3_scripts
     COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test_node3_scripts.sh")
 
