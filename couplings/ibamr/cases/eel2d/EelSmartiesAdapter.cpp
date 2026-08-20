@@ -289,6 +289,8 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
 
     EelEnvironment environment;
     environment.initialize(environment_comm, options.input_file);
+    const std::size_t lagrangian_points =
+      environment.globalLagrangianPointCount();
     if (options.fault_after_initialize) {
       throw std::runtime_error("injected failure after IBAMR initialization");
     }
@@ -352,12 +354,12 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
           "applied_ratio=%.17g start_time=%.17g end_time=%.17g "
           "ibamr_steps=%u forward_velocity=%.17g reward_tracking=%.17g "
           "reward_frequency=%.17g reward_smoothness=%.17g "
-          "reward_total=%.17g\n",
+          "reward_total=%.17g lagrangian_points=%zu\n",
           decision_index + 1, decision.requested_action,
           decision.target_ratio, decision.applied_ratio,
           interval.start_time, interval.end_time, interval.ibamr_steps,
           forward_velocity, reward.tracking, reward.frequency,
-          reward.smoothness, reward.total);
+          reward.smoothness, reward.total, lagrangian_points);
         std::fflush(stdout);
       }
 

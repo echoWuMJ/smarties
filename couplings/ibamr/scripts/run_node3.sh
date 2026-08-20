@@ -18,6 +18,7 @@ Smoke options:
   --envs N                 Concurrent IBAMR environments (default: 1)
   --ranks-per-env N        MPI ranks used by each environment (default: 1)
   --learner-ranks N        Smarties master/learner ranks (default: 1)
+  --learner-threads N      Native CPU threads per learner rank (default: 1)
   --fidelity LEVEL         medium only (default: medium)
   --training FILE          Smarties JSON settings file
   --smoke-steps N          IBAMR steps in the lifecycle episode (default: 1)
@@ -143,6 +144,7 @@ fi
 envs=1
 ranks_per_env=1
 learner_ranks=1
+learner_threads=1
 fidelity=medium
 smoke_steps=1
 train_steps=1
@@ -165,7 +167,7 @@ action_dimension=1
 
 while (($#)); do
   case $1 in
-    --envs|--ranks-per-env|--learner-ranks|--fidelity|--training|--smoke-steps|--train-steps|--task|--source|--build)
+    --envs|--ranks-per-env|--learner-ranks|--learner-threads|--fidelity|--training|--smoke-steps|--train-steps|--task|--source|--build)
       (($# >= 2)) || die "missing value after $1"
       option=$1
       value=$2
@@ -173,6 +175,9 @@ while (($#)); do
         --envs) envs=$value ;;
         --ranks-per-env) ranks_per_env=$value ;;
         --learner-ranks) learner_ranks=$value ;;
+        --learner-threads)
+          learner_threads=$value
+          ;;
         --fidelity) fidelity=$value ;;
         --training) training=$value ;;
         --smoke-steps) smoke_steps=$value ;;
@@ -206,6 +211,8 @@ is_positive_integer "$ranks_per_env" ||
   die "--ranks-per-env must be a positive integer"
 is_positive_integer "$learner_ranks" ||
   die "--learner-ranks must be a positive integer"
+is_positive_integer "$learner_threads" ||
+  die "--learner-threads must be a positive integer"
 is_positive_integer "$smoke_steps" ||
   die "--smoke-steps must be a positive integer"
 if [[ $mode == train ]]; then
@@ -228,6 +235,17 @@ if [[ $training != /* ]]; then
 fi
 [[ -f "$training" ]] || die "training settings not found: $training"
 if [[ $mode == train ]]; then
+  batch_size=$(sed -n \
+    's/.*"batchSize"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+    "$training" | tail -n 1)
+  is_positive_integer "$batch_size" ||
+    die "training settings require a positive integer batchSize: $training"
+  if ((batch_size < learner_threads)); then
+    die "batchSize must be at least learner threads"
+  fi
+  if ((batch_size % learner_threads != 0)); then
+    die "batchSize must be divisible by learner threads"
+  fi
   if [[ $task != /* ]]; then
     task="$source_dir/$task"
   fi
@@ -258,6 +276,8 @@ if [[ $mode == train ]]; then
        train_steps > maximum_single_episode_train_steps)); then
     die "--train-steps $train_steps cannot finish within one physical episode (episode_decisions=$episode_decisions, minTotObsNum=$minimum_training_observations)"
   fi
+else
+  batch_size=not-applicable
 fi
 
 environment_ranks=$((envs * ranks_per_env))
@@ -266,6 +286,7 @@ revision=$(revision_of "$source_dir")
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 run_id="eel2d-${timestamp}-${revision}-$$"
 run_dir="$source_dir/couplings/ibamr/runs/$run_id"
+learner_audit_dir="$run_dir/learner-audit"
 executable="$build_dir/couplings/ibamr/ibamr_eel2d_smoke"
 runtime_library="$build_dir/lib/libsmarties.so"
 build_manifest="$build_dir/couplings/ibamr/build_manifest.txt"
@@ -273,6 +294,8 @@ build_script="$source_dir/couplings/ibamr/scripts/build_node3.sh"
 fidelity_dir="$source_dir/couplings/ibamr/configs/fidelity"
 render_script="$source_dir/couplings/ibamr/scripts/render_input.cmake"
 vertex_file="$source_dir/couplings/ibamr/cases/eel2d/upstream/eel2d.vertex"
+activity_wrapper="$source_dir/couplings/ibamr/tests/test_eel_learner_activity.cmake"
+synthetic_executable="$build_dir/couplings/ibamr/smarties_cpu_learner_environment"
 
 preflight
 
@@ -338,6 +361,13 @@ if [[ $build_status == current ]]; then
   petsc_version=$(manifest_value petsc_version "$build_manifest")
   samrai_overlay=$(manifest_value samrai_overlay "$build_manifest")
   samrai_patch_sha256=$(manifest_value samrai_patch_sha256 "$build_manifest")
+  precision_setting=$(sed -n 's/^SINGLE_PRECISION:BOOL=//p' \
+    "$build_dir/CMakeCache.txt" 2>/dev/null | tail -n 1)
+  case ${precision_setting^^} in
+    ON|TRUE|YES|1) network_precision_bytes=4 ;;
+    OFF|FALSE|NO|0) network_precision_bytes=8 ;;
+    *) network_precision_bytes=unknown ;;
+  esac
 else
   build_revision=unbuilt
   executable_sha256=unbuilt
@@ -350,6 +380,7 @@ else
   petsc_version=unbuilt
   samrai_overlay=unbuilt
   samrai_patch_sha256=unbuilt
+  network_precision_bytes=unbuilt
 fi
 
 hostname_value=$(hostname)
@@ -368,10 +399,19 @@ if [[ $mode == train ]]; then
 else
   effective_train_steps=0
 fi
+learner_activity_gate=0
+if [[ $mode == train &&
+      $(basename "$training") == cpu_learner_eel_activity.json ]]; then
+  [[ $(basename "$task") == speed_tracking_learner_activity.conf ]] ||
+    die "cpu_learner_eel_activity.json requires speed_tracking_learner_activity.conf"
+  [[ $train_steps == 1 ]] ||
+    die "eel learner activity gate requires --train-steps 1"
+  learner_activity_gate=1
+fi
 
 launch_args=(
   --nMasters "$learner_ranks"
-  --nThreads 1
+  --nThreads "$learner_threads"
   --nEnvironments "$envs"
   --workerProcessesPerEnv "$ranks_per_env"
   --learnersOnWorkers 0
@@ -385,20 +425,35 @@ launch_args=(
 if [[ $mode == smoke ]]; then
   launch_args+=(--smoke-steps "$smoke_steps")
 else
-  launch_args+=(--task-file task.conf)
+  launch_args+=(--task-file task.conf --learnerAuditDir "$learner_audit_dir")
 fi
 
 if ((fault_after_initialize)); then
   launch_args+=(--fault-after-initialize)
 fi
 
-command=(mpiexec -n "$mpi_ranks" "$executable" "${launch_args[@]}")
+export OMP_NUM_THREADS=$learner_threads
+export OMP_DYNAMIC=FALSE
+export OMP_PROC_BIND=close
+export OMP_PLACES=cores
+if ((learner_threads > 1)); then
+  command=(mpiexec --bind-to core --map-by slot:PE=4 -n "$mpi_ranks"
+    "$executable" "${launch_args[@]}")
+else
+  command=(mpiexec -n "$mpi_ranks" "$executable" "${launch_args[@]}")
+fi
 
 printf 'SOURCE=%s\n' "$source_dir"
 printf 'BUILD=%s\n' "$build_dir"
 printf 'RUN_ID=%s\n' "$run_id"
 printf 'RUN_DIRECTORY=%s\n' "$run_dir"
 printf 'LEARNER_RANKS=%s\n' "$learner_ranks"
+printf 'LEARNER_THREADS=%s\n' "$learner_threads"
+printf 'LEARNER_ACTIVITY_GATE=%s\n' "$learner_activity_gate"
+printf 'OMP_NUM_THREADS=%s\n' "$OMP_NUM_THREADS"
+printf 'OMP_DYNAMIC=%s\n' "$OMP_DYNAMIC"
+printf 'OMP_PROC_BIND=%s\n' "$OMP_PROC_BIND"
+printf 'OMP_PLACES=%s\n' "$OMP_PLACES"
 printf 'ENVIRONMENT_RANKS=%s\n' "$environment_ranks"
 printf 'MPI_RANKS=%s\n' "$mpi_ranks"
 printf 'FIDELITY=%s\n' "$fidelity"
@@ -406,6 +461,7 @@ printf 'EEL_MODE=%s\n' "$eel_mode"
 printf 'CONTROL_STAGE=%s\n' "$control_stage"
 printf 'BUILD_STATUS=%s\n' "$build_status"
 printf 'BUILD_REVISION=%s\n' "$build_revision"
+printf 'NETWORK_PRECISION_BYTES=%s\n' "$network_precision_bytes"
 printf 'COMMAND='
 printf '%q ' "${command[@]}"
 printf '\n'
@@ -466,6 +522,15 @@ manifest="$run_dir/manifest.txt"
   printf 'samrai_overlay=%s\n' "$samrai_overlay"
   printf 'samrai_patch_sha256=%s\n' "$samrai_patch_sha256"
   printf 'learner_ranks=%s\n' "$learner_ranks"
+  printf 'learner_threads=%s\n' "$learner_threads"
+  printf 'omp_num_threads=%s\n' "$OMP_NUM_THREADS"
+  printf 'omp_dynamic=%s\n' "$OMP_DYNAMIC"
+  printf 'omp_proc_bind=%s\n' "$OMP_PROC_BIND"
+  printf 'omp_places=%s\n' "$OMP_PLACES"
+  printf 'batch_size=%s\n' "$batch_size"
+  printf 'network_precision_bytes=%s\n' "$network_precision_bytes"
+  printf 'learner_audit_dir=%s\n' "$learner_audit_dir"
+  printf 'learner_activity_gate=%s\n' "$learner_activity_gate"
   printf 'environment_count=%s\n' "$envs"
   printf 'ranks_per_environment=%s\n' "$ranks_per_env"
   printf 'total_mpi_ranks=%s\n' "$mpi_ranks"
@@ -489,14 +554,100 @@ manifest="$run_dir/manifest.txt"
   printf '\n'
 } >"$manifest"
 
+process_snapshot()
+{
+  local scope=$1 output=$2 uid pid name
+  uid=$(id -u)
+  : >"$output"
+  while read -r pid name; do
+    case $name in
+      mpiexec|prterun|orterun|ibamr_eel2d_sm|ibamr_eel2d_smoke|\
+      smarties_cpu_le|smarties_cpu_learner_environment)
+        if [[ -r /proc/$pid/environ ]] &&
+           tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null |
+             grep -Fqx "SMARTIES_EEL_RUN_SCOPE=$scope"; then
+          ps -p "$pid" -o pid= -o comm= -o args= >>"$output" 2>/dev/null || true
+        fi
+        ;;
+    esac
+  done < <(ps -u "$uid" -o pid= -o comm=)
+}
+
 set +e
 (
   cd "$run_dir"
-  "${command[@]}" 2>&1 | tee stdout.log
+  SMARTIES_EEL_RUN_SCOPE="$run_dir/main" \
+    "${command[@]}" 2>&1 | tee stdout.log
   exit "${PIPESTATUS[0]}"
 )
 status=$?
 set -e
 printf '%s\n' "$status" >"$run_dir/exit_code.txt"
 printf 'exit_code=%s\n' "$status" >>"$manifest"
-exit "$status"
+process_snapshot "$run_dir/main" "$run_dir/processes-after.txt"
+
+if ((learner_activity_gate == 0)); then
+  exit "$status"
+fi
+
+[[ -f $activity_wrapper ]] || die "learner activity wrapper not found: $activity_wrapper"
+if ((status != 0)) || [[ -s $run_dir/processes-after.txt ]]; then
+  printf 'NOT_RUN\n' >"$run_dir/restart_exit_code.txt"
+  : >"$run_dir/restart-processes-after.txt"
+else
+  [[ -x $synthetic_executable ]] ||
+    die "synthetic checkpoint reload executable is missing: $synthetic_executable"
+  restart_dir="$run_dir/checkpoint-reload"
+  restart_audit_dir="$run_dir/restart-audit"
+  mkdir -p "$restart_dir"
+  cp "$training" "$restart_dir/settings.json"
+  restart_args=(
+    --nMasters 1
+    --nThreads "$learner_threads"
+    --nEnvironments 1
+    --workerProcessesPerEnv 1
+    --learnersOnWorkers 0
+    --nTrainSteps 0
+    --nEvalEpisodes 1
+    --randSeed 11
+    --learnerAuditDir "$restart_audit_dir"
+    --restart "$learner_audit_dir/final"
+    --redirectAppStdoutToFile 0
+  )
+  if ((learner_threads > 1)); then
+    restart_command=(mpiexec --bind-to core --map-by slot:PE=4 -n 2
+      "$synthetic_executable" "${restart_args[@]}")
+  else
+    restart_command=(mpiexec -n 2 "$synthetic_executable" "${restart_args[@]}")
+  fi
+  printf 'CHECKPOINT_RELOAD_COMMAND='
+  printf '%q ' "${restart_command[@]}"
+  printf '\n'
+  set +e
+  (
+    cd "$restart_dir"
+    SMARTIES_EEL_RUN_SCOPE="$run_dir/restart" \
+      "${restart_command[@]}" >"$run_dir/restart_stdout.log" \
+      2>"$run_dir/restart_stderr.log"
+  )
+  restart_status=$?
+  set -e
+  printf '%s\n' "$restart_status" >"$run_dir/restart_exit_code.txt"
+  process_snapshot "$run_dir/restart" "$run_dir/restart-processes-after.txt"
+  {
+    printf 'restart_executable=%s\n' "$synthetic_executable"
+    printf 'restart_executable_sha256=%s\n' \
+      "$(sha256sum "$synthetic_executable" | awk '{print $1}')"
+    printf 'restart_command='
+    printf '%q ' "${restart_command[@]}"
+    printf '\n'
+    printf 'restart_exit_code=%s\n' "$restart_status"
+  } >>"$manifest"
+fi
+
+set +e
+activity_output=$(cmake -DRUN_DIR="$run_dir" -P "$activity_wrapper" 2>&1)
+activity_status=$?
+set -e
+printf '%s\n' "$activity_output" | tee "$run_dir/learner_activity_verdict.txt"
+exit "$activity_status"

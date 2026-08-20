@@ -3,10 +3,14 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+real_cmake=$(command -v cmake)
 build_script="$repo_root/couplings/ibamr/scripts/build_node3.sh"
 prepare_script="$repo_root/couplings/ibamr/scripts/prepare_node3_ibamr.sh"
 run_script="$repo_root/couplings/ibamr/scripts/run_node3.sh"
 speed_settings="$repo_root/couplings/ibamr/configs/training/speed_tracking.json"
+activity_settings="$repo_root/couplings/ibamr/configs/training/cpu_learner_eel_activity.json"
+activity_task="$repo_root/couplings/ibamr/tests/fixtures/speed_tracking_learner_activity.conf"
+activity_wrapper="$repo_root/couplings/ibamr/tests/test_eel_learner_activity.cmake"
 fixture_root=$(mktemp -d)
 trap 'rm -rf "$fixture_root"' EXIT
 
@@ -33,6 +37,11 @@ EOF
 cat >"$fixture_root/bin/cmake" <<'EOF'
 #!/usr/bin/env bash
 for argument in "$@"; do
+  if [[ $argument == *test_eel_learner_activity.cmake ]]; then
+    exec "$REAL_CMAKE" "$@"
+  fi
+done
+for argument in "$@"; do
   case $argument in
     -DOUTPUT_FILE=*)
       output=${argument#-DOUTPUT_FILE=}
@@ -47,6 +56,9 @@ if [[ "${1:-}" == "--version" ]]; then
   printf 'Open MPI fixture 5.0.9\n'
   exit 0
 fi
+while [[ ${1:-} == --bind-to || ${1:-} == --map-by ]]; do
+  shift 2
+done
 [[ "${1:-}" == "-n" ]]
 shift 2
 "$@"
@@ -54,12 +66,17 @@ EOF
 chmod +x "$fixture_root/bin/gcc" "$fixture_root/bin/g++" \
   "$fixture_root/bin/mpicc" "$fixture_root/bin/mpicxx" \
   "$fixture_root/bin/cmake" "$fixture_root/bin/mpiexec"
+cp "$(command -v sleep)" "$fixture_root/bin/prterun"
+chmod +x "$fixture_root/bin/prterun"
+export FAKE_EEL_PRTERUN="$fixture_root/bin/prterun"
+export FAKE_EEL_RESIDUAL_PID_FILE="$fixture_root/eel-residual.pid"
 
 cat >"$fixture_root/enable.sh" <<EOF
 export PATH="$fixture_root/bin:\$PATH"
 export IBAMR_ROOT=/data2/mjwu/autoibamr-v0.18.0/packages/IBAMR-0.18.0
 EOF
 export SMARTIES_IBAMR_ENV_SCRIPT="$fixture_root/enable.sh"
+export REAL_CMAKE="$real_cmake"
 
 fail()
 {
@@ -100,6 +117,33 @@ min_training_observations=$(sed -n \
 if grep -Eiq 'pytorch|cuda' "$speed_settings"; then
   fail "speed-tracking baseline unexpectedly enables PyTorch/CUDA"
 fi
+[[ -f $activity_settings && -f $activity_task ]] ||
+  fail "missing frozen eel learner activity settings/task"
+activity_batch=$(sed -n \
+  's/.*"batchSize"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+  "$activity_settings")
+activity_minimum=$(sed -n \
+  's/.*"minTotObsNum"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+  "$activity_settings")
+[[ $activity_batch == 4 && $activity_minimum == 4 ]] ||
+  fail "eel learner activity settings must freeze batch/minimum at 4"
+grep -Eq '^[[:space:]]*warmup_cycles[[:space:]]*=[[:space:]]*0([.]0)?[[:space:]]*$' \
+  "$activity_task" || fail "eel learner activity warmup must be zero"
+grep -Eq '^[[:space:]]*episode_decisions[[:space:]]*=[[:space:]]*5[[:space:]]*$' \
+  "$activity_task" || fail "eel learner activity episode must have five decisions"
+if grep -Eiq 'pytorch|torch|cuda|pybind' "$activity_settings"; then
+  fail "eel learner activity settings enable a forbidden backend"
+fi
+
+cat >"$fixture_root/activity-settings.json" <<'EOF'
+{"learner":"VRACER","batchSize":4,"minTotObsNum":1,"obsPerStep":1}
+EOF
+cat >"$fixture_root/batch-too-small.json" <<'EOF'
+{"learner":"VRACER","batchSize":2,"minTotObsNum":1,"obsPerStep":1}
+EOF
+cat >"$fixture_root/batch-not-divisible.json" <<'EOF'
+{"learner":"VRACER","batchSize":6,"minTotObsNum":1,"obsPerStep":1}
+EOF
 
 mkdir -p "$fixture_root/base/tmp/unpack/IBSAMRAI2-2025.10.29" \
   "$fixture_root/base/tmp/unpack/IBAMR-0.18.0"
@@ -160,6 +204,47 @@ assert_contains "$output" "CONTROL_STAGE=stage2_physical_control_experimental"
 assert_contains "$output" "--eel-mode speed-tracking"
 assert_contains "$output" "--task-file task.conf"
 assert_contains "$output" "--nTrainSteps 1"
+assert_contains "$output" "--nThreads 1"
+
+output=$(bash "$run_script" train --dry-run --envs 1 --ranks-per-env 2 \
+  --learner-threads 4 --fidelity medium \
+  --training "$fixture_root/activity-settings.json" \
+  --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf \
+  --train-steps 1)
+assert_contains "$output" "MPI_RANKS=3"
+assert_contains "$output" "LEARNER_THREADS=4"
+assert_contains "$output" "OMP_NUM_THREADS=4"
+assert_contains "$output" "LEARNER_ACTIVITY_GATE=0"
+assert_contains "$output" "--nThreads 4"
+assert_contains "$output" "--learnerAuditDir"
+assert_contains "$output" "--bind-to core --map-by slot:PE=4 -n 3"
+if grep -Eiq 'pytorch|torch|cuda|pybind' <<<"$output"; then
+  fail "threaded eel launcher exposed a forbidden backend token"
+fi
+
+if capture_status "$fixture_root/batch-too-small.log" \
+  bash "$run_script" train --dry-run --envs 1 --ranks-per-env 2 \
+    --learner-threads 4 --fidelity medium \
+    --training "$fixture_root/batch-too-small.json" \
+    --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf \
+    --train-steps 1; then
+  fail "threaded eel launcher accepted batchSize smaller than threads"
+fi
+assert_contains "$(<"$fixture_root/batch-too-small.log")" \
+  "batchSize must be at least learner threads"
+assert_not_contains "$(<"$fixture_root/batch-too-small.log")" "COMMAND="
+
+if capture_status "$fixture_root/batch-not-divisible.log" \
+  bash "$run_script" train --dry-run --envs 1 --ranks-per-env 2 \
+    --learner-threads 4 --fidelity medium \
+    --training "$fixture_root/batch-not-divisible.json" \
+    --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf \
+    --train-steps 1; then
+  fail "threaded eel launcher accepted non-divisible batchSize"
+fi
+assert_contains "$(<"$fixture_root/batch-not-divisible.log")" \
+  "batchSize must be divisible by learner threads"
+assert_not_contains "$(<"$fixture_root/batch-not-divisible.log")" "COMMAND="
 
 if capture_status "$fixture_root/train-missing-task.log" \
   bash "$run_script" train --dry-run --envs 1 --ranks-per-env 1 \
@@ -215,20 +300,71 @@ mkdir -p "$fixture_source/couplings/ibamr/configs/fidelity" \
   "$fixture_source/couplings/ibamr/cases/eel2d/upstream" \
   "$fixture_build/couplings/ibamr" \
   "$fixture_build/lib"
+printf 'SINGLE_PRECISION:BOOL=ON\n' >"$fixture_build/CMakeCache.txt"
 printf 'cmake_minimum_required(VERSION 3.5)\n' >"$fixture_source/CMakeLists.txt"
 printf 'fixture fidelity\n' >"$fixture_source/couplings/ibamr/configs/fidelity/medium.conf"
 printf '{}\n' >"$fixture_source/couplings/ibamr/configs/training/smoke.json"
 cp "$speed_settings" \
   "$fixture_source/couplings/ibamr/configs/training/speed_tracking.json"
+cp "$activity_settings" \
+  "$fixture_source/couplings/ibamr/configs/training/cpu_learner_eel_activity.json"
 cp "$repo_root/couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf" \
   "$fixture_source/couplings/ibamr/configs/tasks/task.conf"
+cp "$activity_task" \
+  "$fixture_source/couplings/ibamr/configs/tasks/speed_tracking_learner_activity.conf"
+mkdir -p "$fixture_source/couplings/ibamr/tests"
+cp "$activity_wrapper" \
+  "$fixture_source/couplings/ibamr/tests/test_eel_learner_activity.cmake"
 printf 'fixture renderer\n' >"$fixture_source/couplings/ibamr/scripts/render_input.cmake"
 printf 'fixture vertex\n' >"$fixture_source/couplings/ibamr/cases/eel2d/upstream/eel2d.vertex"
 cat >"$fixture_build/couplings/ibamr/ibamr_eel2d_smoke" <<'EOF'
 #!/usr/bin/env bash
+if [[ ${FAKE_EEL_RESIDUAL:-0} == 1 ]]; then
+  "$FAKE_EEL_PRTERUN" 30 </dev/null >/dev/null 2>&1 &
+  printf '%s\n' "$!" >"$FAKE_EEL_RESIDUAL_PID_FILE"
+fi
+audit=none
+while (($#)); do
+  case $1 in
+    --learnerAuditDir) audit=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [[ $audit != none ]]; then
+  mkdir -p "$audit/initial" "$audit/final"
+  printf 'initial\n' >"$audit/initial/agent_00_net_weights.raw"
+  printf 'final\n' >"$audit/final/agent_00_net_weights.raw"
+  cat >"$audit/learner_audit.log" <<'AUDIT'
+SMARTIES_NETWORK_AUDIT stage=initialized network=agent_00_network0 step=0 threads=4 precision_bytes=4 params=544 digest=1111111111111111 sum=0 sum_squares=1 max_abs=1 finite=1
+SMARTIES_NETWORK_AUDIT stage=update network=agent_00_network0 step=1 threads=4 precision_bytes=4 params=544 digest=2222222222222222 sum=0 sum_squares=1 max_abs=1 finite=1
+SMARTIES_NETWORK_AUDIT stage=final network=agent_00_network0 step=1 threads=4 precision_bytes=4 params=544 digest=2222222222222222 sum=0 sum_squares=1 max_abs=1 finite=1
+AUDIT
+  for decision in 1 2 3 4 5; do
+    printf 'EEL_CONTROL decision=%s action=0 target_ratio=1 applied_ratio=1 start_time=0 end_time=0.1 ibamr_steps=100 forward_velocity=0 reward_tracking=-0.1 reward_frequency=0 reward_smoothness=0 reward_total=-0.1 lagrangian_points=2932\n' "$decision"
+  done
+  printf 'EEL_CONTROL_TERMINAL decisions=5 ibamr_steps=500 clipped_actions=0 reason=episode_horizon\n'
+fi
 printf 'fixture coupling completed\n'
 EOF
 chmod +x "$fixture_build/couplings/ibamr/ibamr_eel2d_smoke"
+cat >"$fixture_build/couplings/ibamr/smarties_cpu_learner_environment" <<'EOF'
+#!/usr/bin/env bash
+audit=none
+while (($#)); do
+  case $1 in
+    --learnerAuditDir) audit=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+mkdir -p "$audit"
+cat >"$audit/learner_audit.log" <<'AUDIT'
+SMARTIES_NETWORK_AUDIT stage=restart network=agent_00_network0 step=1 threads=4 precision_bytes=4 params=544 digest=2222222222222222 sum=0 sum_squares=1 max_abs=1 finite=1
+AUDIT
+printf 'SMARTIES_SYNTHETIC_STEP seed=11 environment=1 episode=1 decision=1 action=0 target=0 reward=0 squared_error=0 terminal=0 finite=1\n'
+printf 'COUPLING_DRIVER_RETURNED_MPI_ACTIVE\n'
+printf 'COUPLING_DRIVER_DESTROYED_MPI_FINALIZED\n'
+EOF
+chmod +x "$fixture_build/couplings/ibamr/smarties_cpu_learner_environment"
 printf 'fixture smarties runtime library\n' > \
   "$fixture_build/lib/libsmarties.so"
 fixture_executable_sha=$(sha256sum \
@@ -343,6 +479,54 @@ assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
   "control_stage=stage2_physical_control_experimental"
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
   "--task-file task.conf"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" "learner_threads=1"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" "omp_proc_bind=close"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" "omp_places=cores"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" "batch_size=1"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
+  "network_precision_bytes=4"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
+  "learner_audit_dir=$real_train_run_dir/learner-audit"
+
+output=$(bash "$run_script" train --source "$fixture_source" \
+  --build "$fixture_build" --envs 1 --ranks-per-env 2 \
+  --learner-threads 4 --fidelity medium \
+  --training couplings/ibamr/configs/training/cpu_learner_eel_activity.json \
+  --task couplings/ibamr/configs/tasks/speed_tracking_learner_activity.conf \
+  --train-steps 1)
+assert_contains "$output" "EEL_LEARNER_ACTIVITY verdict=PASS"
+activity_run_dir=$(printf '%s\n' "$output" | sed -n 's/^RUN_DIRECTORY=//p')
+[[ -f $activity_run_dir/restart-audit/learner_audit.log ]] ||
+  fail "eel learner activity run did not archive restart audit"
+[[ "$(<"$activity_run_dir/restart_exit_code.txt")" == 0 ]] ||
+  fail "eel learner activity restart status was not zero"
+assert_contains "$(<"$activity_run_dir/manifest.txt")" "learner_threads=4"
+assert_contains "$(<"$activity_run_dir/manifest.txt")" "learner_activity_gate=1"
+assert_contains "$(<"$activity_run_dir/manifest.txt")" \
+  "command=mpiexec --bind-to core --map-by slot:PE=4 -n 3"
+
+set +e
+FAKE_EEL_RESIDUAL=1 bash "$run_script" train --source "$fixture_source" \
+  --build "$fixture_build" --envs 1 --ranks-per-env 2 \
+  --learner-threads 4 --fidelity medium \
+  --training couplings/ibamr/configs/training/cpu_learner_eel_activity.json \
+  --task couplings/ibamr/configs/tasks/speed_tracking_learner_activity.conf \
+  --train-steps 1 >"$fixture_root/eel-residual.log" 2>&1
+eel_residual_status=$?
+set -e
+eel_residual_output=$(<"$fixture_root/eel-residual.log")
+eel_residual_run=$(printf '%s\n' "$eel_residual_output" | \
+  sed -n 's/^RUN_DIRECTORY=//p')
+if [[ -f $FAKE_EEL_RESIDUAL_PID_FILE ]]; then
+  eel_residual_pid=$(<"$FAKE_EEL_RESIDUAL_PID_FILE")
+  kill "$eel_residual_pid" 2>/dev/null || true
+fi
+[[ $eel_residual_status -ne 0 &&
+   $eel_residual_output == *"verdict=OPERATIONAL_INCOMPLETE"* ]] ||
+  fail "run-scoped eel residual was not operationally rejected: $eel_residual_output"
+[[ "$(<"$eel_residual_run/restart_exit_code.txt")" == NOT_RUN ]] ||
+  fail "checkpoint reload ran after eel left a process"
+assert_not_contains "$eel_residual_output" "CHECKPOINT_RELOAD_COMMAND="
 
 rm "$fixture_build/lib/libsmarties.so"
 output=$(bash "$run_script" smoke --source "$fixture_source" \
@@ -435,5 +619,84 @@ fi
 assert_contains "$(<"$fixture_root/gcc.log")" "requires gcc 8.5.0"
 [[ ! -e "$fixture_root/build/CMakeCache.txt" ]] ||
   fail "build preflight invoked CMake after compiler rejection"
+
+[[ -f $activity_wrapper ]] || fail "missing eel learner activity wrapper"
+activity_valid="$fixture_root/activity-valid"
+mkdir -p "$activity_valid/learner-audit" "$activity_valid/restart-audit"
+printf '0\n' >"$activity_valid/exit_code.txt"
+printf '0\n' >"$activity_valid/restart_exit_code.txt"
+: >"$activity_valid/processes-after.txt"
+: >"$activity_valid/restart-processes-after.txt"
+cat >"$activity_valid/learner-audit/learner_audit.log" <<'EOF'
+SMARTIES_NETWORK_AUDIT stage=initialized network=agent_00_network0 step=0 threads=4 precision_bytes=4 params=544 digest=1111111111111111 sum=0 sum_squares=1 max_abs=1 finite=1
+SMARTIES_NETWORK_AUDIT stage=update network=agent_00_network0 step=1 threads=4 precision_bytes=4 params=544 digest=2222222222222222 sum=0 sum_squares=1 max_abs=1 finite=1
+SMARTIES_NETWORK_AUDIT stage=final network=agent_00_network0 step=1 threads=4 precision_bytes=4 params=544 digest=2222222222222222 sum=0 sum_squares=1 max_abs=1 finite=1
+EOF
+cat >"$activity_valid/restart-audit/learner_audit.log" <<'EOF'
+SMARTIES_NETWORK_AUDIT stage=restart network=agent_00_network0 step=1 threads=4 precision_bytes=4 params=544 digest=2222222222222222 sum=0 sum_squares=1 max_abs=1 finite=1
+EOF
+for decision in 1 2 3 4 5; do
+  printf 'EEL_CONTROL decision=%s action=0 target_ratio=1 applied_ratio=1 start_time=0 end_time=0.1 ibamr_steps=100 forward_velocity=0 reward_tracking=-0.1 reward_frequency=0 reward_smoothness=0 reward_total=-0.1 lagrangian_points=2932\n' "$decision"
+done >"$activity_valid/stdout.log"
+printf 'EEL_CONTROL_TERMINAL decisions=5 ibamr_steps=500 clipped_actions=0 reason=episode_horizon\n' >>"$activity_valid/stdout.log"
+cat >"$activity_valid/restart_stdout.log" <<'EOF'
+SMARTIES_SYNTHETIC_STEP seed=11 environment=1 episode=1 decision=1 action=0 target=0 reward=0 squared_error=0 terminal=0 finite=1
+COUPLING_DRIVER_RETURNED_MPI_ACTIVE
+COUPLING_DRIVER_DESTROYED_MPI_FINALIZED
+EOF
+
+activity_expect()
+{
+  local label=$1 directory=$2 verdict=$3 expected_status=$4 output status
+  set +e
+  output=$("$real_cmake" -DRUN_DIR="$directory" \
+    -P "$activity_wrapper" 2>&1)
+  status=$?
+  set -e
+  [[ $status -eq $expected_status &&
+     $output == *"EEL_LEARNER_ACTIVITY verdict=$verdict"* ]] ||
+    fail "$label expected $verdict/$expected_status, got $status: $output"
+}
+
+activity_expect valid "$activity_valid" PASS 0
+
+activity_case="$fixture_root/activity-missing-update"
+cp -R "$activity_valid" "$activity_case"
+sed -i '/ stage=update /d' "$activity_case/learner-audit/learner_audit.log"
+activity_expect missing-update "$activity_case" UPDATE_NOT_OBSERVED 1
+
+activity_case="$fixture_root/activity-unchanged"
+cp -R "$activity_valid" "$activity_case"
+sed -i 's/stage=final\(.*\)digest=2222222222222222/stage=final\1digest=1111111111111111/' \
+  "$activity_case/learner-audit/learner_audit.log"
+activity_expect unchanged "$activity_case" UPDATE_NOT_OBSERVED 1
+
+activity_case="$fixture_root/activity-nonfinite"
+cp -R "$activity_valid" "$activity_case"
+sed -i '/ stage=update /s/finite=1/finite=0/' \
+  "$activity_case/learner-audit/learner_audit.log"
+activity_expect nonfinite "$activity_case" NONFINITE_UPDATE 1
+
+activity_case="$fixture_root/activity-points"
+cp -R "$activity_valid" "$activity_case"
+sed -i 's/lagrangian_points=2932/lagrangian_points=76/' \
+  "$activity_case/stdout.log"
+activity_expect points "$activity_case" COUPLING_PROTOCOL_FAILURE 1
+
+activity_case="$fixture_root/activity-terminal"
+cp -R "$activity_valid" "$activity_case"
+sed -i '/^EEL_CONTROL_TERMINAL /d' "$activity_case/stdout.log"
+activity_expect terminal "$activity_case" COUPLING_PROTOCOL_FAILURE 1
+
+activity_case="$fixture_root/activity-restart"
+cp -R "$activity_valid" "$activity_case"
+sed -i 's/digest=2222222222222222/digest=3333333333333333/' \
+  "$activity_case/restart-audit/learner_audit.log"
+activity_expect restart "$activity_case" CHECKPOINT_MISMATCH 1
+
+activity_case="$fixture_root/activity-residual"
+cp -R "$activity_valid" "$activity_case"
+printf '12345 prterun stale fixture\n' >"$activity_case/processes-after.txt"
+activity_expect residual "$activity_case" OPERATIONAL_INCOMPLETE 1
 
 printf 'node3 script behavior tests passed\n'

@@ -399,4 +399,29 @@ if(BUILD_IBAMR_COUPLING)
   set_tests_properties(eel_smoke_failure_after_mpi PROPERTIES
     WORKING_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}"
     TIMEOUT 300)
+
+  option(IBAMR_SMARTIES_ENABLE_NODE3_EEL_LEARNER_ACTIVITY
+    "Register the explicit node3-only eel learner activity target" OFF)
+  if(IBAMR_SMARTIES_ENABLE_NODE3_EEL_LEARNER_ACTIVITY)
+    add_test(
+      NAME eel_learner_activity_node3
+      COMMAND bash
+        "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/run_node3.sh" train
+        --source "${PROJECT_SOURCE_DIR}"
+        --build "${PROJECT_BINARY_DIR}"
+        --envs 1
+        --ranks-per-env 2
+        --learner-ranks 1
+        --learner-threads 4
+        --fidelity medium
+        --training
+          couplings/ibamr/configs/training/cpu_learner_eel_activity.json
+        --task
+          couplings/ibamr/tests/fixtures/speed_tracking_learner_activity.conf
+        --train-steps 1)
+    set_tests_properties(eel_learner_activity_node3 PROPERTIES
+      LABELS "physical;node3;learner"
+      RUN_SERIAL TRUE
+      TIMEOUT 7200)
+  endif()
 endif()

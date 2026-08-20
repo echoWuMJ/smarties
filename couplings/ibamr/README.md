@@ -203,6 +203,41 @@ This gate establishes native Smarties CPU update, checkpoint-restart, and
 analytic-task convergence behavior. It does not establish eel policy quality,
 eel convergence, swimming efficiency, or long-horizon IBAMR stability.
 
+### Medium-eel native learner activity gate
+
+After the synthetic matrix passes, the dedicated medium-eel gate checks that
+the coupled production path performs one finite native learner update:
+
+```bash
+./couplings/ibamr/scripts/run_node3.sh train \
+  --envs 1 --ranks-per-env 2 --learner-ranks 1 --learner-threads 4 \
+  --fidelity medium \
+  --training couplings/ibamr/configs/training/cpu_learner_eel_activity.json \
+  --task couplings/ibamr/tests/fixtures/speed_tracking_learner_activity.conf \
+  --train-steps 1
+```
+
+The target uses one learner rank and one two-rank IBAMR environment. Core
+binding reserves four processing elements for each of the three MPI ranks, or
+12 logical CPUs total. The manifest records learner threads, OpenMP binding,
+batch size, network scalar width, and the absolute learner-audit directory.
+Every canonical `EEL_CONTROL` transition also records the observed Lagrangian
+point count; the gate requires the official-medium count of 2932.
+
+Once the eel MPI job has returned and its run-scoped process snapshot is
+empty, the launcher starts a separate synthetic MPI job that reloads the eel
+final checkpoint. This second job does not initialize PETSc or IBAMR, does not
+add evaluation transitions to replay memory, and must reproduce the final
+parameter digest while emitting finite actions. The two MPI jobs never
+overlap; `CouplingDriver` owns initialization/finalization in each job.
+
+This proves one native CPU update, the eel protocol record, clean process
+return, and checkpoint reload. The target speed and reward weights are
+diagnostic only: the result does not prove eel convergence or policy quality.
+It does not enable PyTorch, CUDA, pybind11, or Python bindings. Registration is
+opt-in through `IBAMR_SMARTIES_ENABLE_NODE3_EEL_LEARNER_ACTIVITY=ON`; the test
+is labelled `physical;node3;learner` and is absent from ordinary CTest.
+
 ### One-rank/two-rank physical consistency gate
 
 On the configured node3 build, select the focused gate with:
