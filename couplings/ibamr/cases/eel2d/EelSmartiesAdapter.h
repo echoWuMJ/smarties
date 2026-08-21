@@ -29,10 +29,13 @@ struct SmokeProtocolReport
 
 struct ControlProtocolReport
 {
+  unsigned completed_segments;
   unsigned completed_decisions;
   unsigned completed_ibamr_steps;
   unsigned clipped_actions;
-  bool terminal_sent;
+  unsigned truncated_segments;
+  unsigned environment_initializations;
+  bool smarties_termination_received;
   bool finite_state_and_reward;
   unsigned state_dimension;
   unsigned action_dimension;

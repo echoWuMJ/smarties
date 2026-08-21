@@ -1,0 +1,146 @@
+cmake_minimum_required(VERSION 3.5)
+
+function(continuing_failure message_text)
+  message(FATAL_ERROR "eel continuing protocol failed: ${message_text}")
+endfunction()
+
+function(control_field line key output)
+  if("${line}" MATCHES "(^| )${key}=([^ ]+)")
+    set(${output} "${CMAKE_MATCH_2}" PARENT_SCOPE)
+  else()
+    continuing_failure("record has no ${key}: ${line}")
+  endif()
+endfunction()
+
+foreach(required IN ITEMS MPIEXEC_EXECUTABLE MPIEXEC_NUMPROC_FLAG
+                         TEST_EXECUTABLE INPUT_FILE SETTINGS_FILE TASK_FILE
+                         VERTEX_FILE RUN_ROOT)
+  if(NOT DEFINED ${required} OR "${${required}}" STREQUAL "")
+    continuing_failure("missing ${required}")
+  endif()
+endforeach()
+foreach(path IN ITEMS "${TEST_EXECUTABLE}" "${INPUT_FILE}" "${SETTINGS_FILE}"
+                      "${TASK_FILE}" "${VERTEX_FILE}")
+  if(NOT EXISTS "${path}")
+    continuing_failure("missing input ${path}")
+  endif()
+endforeach()
+
+file(REMOVE_RECURSE "${RUN_ROOT}")
+file(MAKE_DIRECTORY "${RUN_ROOT}")
+configure_file("${INPUT_FILE}" "${RUN_ROOT}/input2d" COPYONLY)
+configure_file("${SETTINGS_FILE}" "${RUN_ROOT}/settings.json" COPYONLY)
+configure_file("${TASK_FILE}" "${RUN_ROOT}/task.continuing.conf" COPYONLY)
+configure_file("${VERTEX_FILE}" "${RUN_ROOT}/eel2d.vertex" COPYONLY)
+
+execute_process(
+  COMMAND "${MPIEXEC_EXECUTABLE}" "${MPIEXEC_NUMPROC_FLAG}" 2
+          ${MPIEXEC_PREFLAGS} "${TEST_EXECUTABLE}"
+          --nMasters 1 --nThreads 1 --nEnvironments 1
+          --workerProcessesPerEnv 1 --learnersOnWorkers 0
+          --nTrainUpdates 1 --restart none --setupFolder .
+          --eel-mode speed-tracking --input-file input2d
+          --task-file task.continuing.conf
+          ${MPIEXEC_POSTFLAGS}
+  WORKING_DIRECTORY "${RUN_ROOT}"
+  RESULT_VARIABLE status
+  OUTPUT_FILE "${RUN_ROOT}/stdout.log"
+  ERROR_FILE "${RUN_ROOT}/stderr.log"
+  TIMEOUT 1800)
+if(NOT status EQUAL 0)
+  file(READ "${RUN_ROOT}/stdout.log" stdout)
+  file(READ "${RUN_ROOT}/stderr.log" stderr)
+  continuing_failure("application exited ${status}:\n${stdout}\n${stderr}")
+endif()
+
+file(GLOB_RECURSE application_logs "${RUN_ROOT}/simulation_*/output_*")
+set(control_logs "${RUN_ROOT}/stdout.log" ${application_logs})
+set(transitions)
+set(segments)
+set(completions)
+set(terminals)
+foreach(control_log IN LISTS control_logs)
+  file(STRINGS "${control_log}" records REGEX "^EEL_CONTROL")
+  foreach(record IN LISTS records)
+    if(record MATCHES "^EEL_CONTROL segment=")
+      list(APPEND transitions "${record}")
+    elseif(record MATCHES "^EEL_CONTROL_SEGMENT ")
+      list(APPEND segments "${record}")
+    elseif(record MATCHES "^EEL_CONTROL_COMPLETE ")
+      list(APPEND completions "${record}")
+    elseif(record MATCHES "^EEL_CONTROL_TERMINAL ")
+      list(APPEND terminals "${record}")
+    endif()
+  endforeach()
+endforeach()
+
+list(LENGTH terminals terminal_count)
+if(NOT terminal_count EQUAL 0)
+  continuing_failure("unexpected EEL_CONTROL_TERMINAL record")
+endif()
+list(LENGTH segments segment_count)
+if(segment_count LESS 2)
+  continuing_failure("expected at least two truncated segment records, observed ${segment_count}")
+endif()
+set(segment_ids)
+foreach(record IN LISTS segments)
+  control_field("${record}" segment segment)
+  control_field("${record}" status status_field)
+  control_field("${record}" reason reason)
+  if(NOT status_field STREQUAL "truncated" OR
+     NOT reason STREQUAL "logical_horizon")
+    continuing_failure("segment is not a logical-horizon truncation: ${record}")
+  endif()
+  list(APPEND segment_ids "${segment}")
+endforeach()
+list(REMOVE_DUPLICATES segment_ids)
+list(LENGTH segment_ids distinct_segment_count)
+if(distinct_segment_count LESS 2)
+  continuing_failure("segment records do not contain two distinct segments")
+endif()
+
+set(previous_start "")
+set(previous_end "")
+set(lagrangian_points "")
+foreach(record IN LISTS transitions)
+  control_field("${record}" start_time start_time)
+  control_field("${record}" end_time end_time)
+  control_field("${record}" lagrangian_points points)
+  if(previous_start AND NOT start_time GREATER previous_start)
+    continuing_failure("control start times do not strictly advance: ${record}")
+  endif()
+  if(previous_end AND NOT end_time GREATER previous_end)
+    continuing_failure("control end times do not strictly advance: ${record}")
+  endif()
+  if(NOT end_time GREATER start_time)
+    continuing_failure("control interval is not positive: ${record}")
+  endif()
+  if(lagrangian_points STREQUAL "")
+    set(lagrangian_points "${points}")
+  elseif(NOT points STREQUAL lagrangian_points)
+    continuing_failure("lagrangian_points changed from ${lagrangian_points} to ${points}")
+  endif()
+  set(previous_start "${start_time}")
+  set(previous_end "${end_time}")
+endforeach()
+if(lagrangian_points STREQUAL "" OR lagrangian_points EQUAL 0)
+  continuing_failure("lagrangian_points is not one constant nonzero value")
+endif()
+
+list(LENGTH completions completion_count)
+if(NOT completion_count EQUAL 1)
+  continuing_failure("expected one EEL_CONTROL_COMPLETE record, observed ${completion_count}")
+endif()
+list(GET completions 0 completion)
+if(NOT completion MATCHES " stopped_by=smarties($| )")
+  continuing_failure("completion was not stopped by Smarties: ${completion}")
+endif()
+
+file(READ "${RUN_ROOT}/stdout.log" driver_output)
+if(NOT driver_output MATCHES "EEL_CONTROL_DRIVER_RETURNED_MPI_ACTIVE" OR
+   NOT driver_output MATCHES "EEL_CONTROL_DRIVER_DESTROYED_MPI_FINALIZED")
+  continuing_failure("missing driver MPI lifecycle markers")
+endif()
+
+message(STATUS
+  "EEL_CONTINUING_PROTOCOL status=PASS segments=${segment_count} lagrangian_points=${lagrangian_points}")

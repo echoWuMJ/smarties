@@ -3,6 +3,7 @@
 #include "EelControlMeasurement.h"
 #include "EelControlTask.h"
 #include "EelEnvironment.h"
+#include "EelLogicalSegments.h"
 
 #include <smarties.h>
 
@@ -27,7 +28,8 @@ namespace
 {
 
 SmokeProtocolReport protocol_report{ 0, false };
-ControlProtocolReport control_protocol_report{ 0, 0, 0, false, false, 0, 0 };
+ControlProtocolReport control_protocol_report{
+  0, 0, 0, 0, 0, 0, false, false, 0, 0 };
 
 struct SmokeOptions
 {
@@ -273,7 +275,7 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
                              int argc,
                              char** argv)
 {
-  control_protocol_report = { 0, 0, 0, false, true, 5, 1 };
+  control_protocol_report = { 0, 0, 0, 0, 0, 0, false, true, 5, 1 };
   if (comm == nullptr || environment_comm == MPI_COMM_NULL) {
     MPI_Abort(MPI_COMM_WORLD, 96);
   }
@@ -289,6 +291,7 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
 
     EelEnvironment environment;
     environment.initialize(environment_comm, options.input_file);
+    control_protocol_report.environment_initializations = 1;
     const std::size_t lagrangian_points =
       environment.globalLagrangianPointCount();
     if (options.fault_after_initialize) {
@@ -313,83 +316,102 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
 
     std::array<double, 5> state =
       task.makeState(forward_velocity, environment.currentTailBeatPhase());
-    comm->sendInitState(asVector(state));
+    EelLogicalSegments segments(config.episode_decisions);
+    while (environment.stepsRemaining() && !comm->terminateTraining()) {
+      segments.beginSegment();
+      comm->sendInitState(asVector(state));
+      if (comm->terminateTraining()) break;
 
-    const char* terminal_reason = "episode_horizon";
-    for (unsigned decision_index = 0;
-         decision_index < config.episode_decisions &&
-         environment.stepsRemaining();
-         ++decision_index) {
-      const std::vector<double> action = comm->recvAction();
-      if (action.size() != 1)
-        throw std::runtime_error("eel control action dimension is not one");
+      while (segments.segmentActive()) {
+        const std::vector<double> action = comm->recvAction();
+        if (comm->terminateTraining()) break;
+        if (action.size() != 1)
+          throw std::runtime_error("eel control action dimension is not one");
 
-      const ControlDecision decision = task.applyAction(action[0]);
-      environment.setTailBeatFrequencyRatio(decision.applied_ratio);
-      const ControlIntervalResult interval =
-        environment.advanceControlInterval(task.controlInterval());
-      forward_velocity = forwardVelocity(interval, config);
-      state = task.makeState(forward_velocity,
-                             environment.currentTailBeatPhase());
-      const RewardBreakdown reward =
-        task.reward(forward_velocity, decision.previous_ratio);
-      if (!finiteTransition(state, reward))
-        throw std::runtime_error("non-finite eel state or reward");
+        const ControlDecision decision = task.applyAction(action[0]);
+        environment.setTailBeatFrequencyRatio(decision.applied_ratio);
+        const ControlIntervalResult interval =
+          environment.advanceControlInterval(task.controlInterval());
+        forward_velocity = forwardVelocity(interval, config);
+        state = task.makeState(forward_velocity,
+                               environment.currentTailBeatPhase());
+        const RewardBreakdown reward =
+          task.reward(forward_velocity, decision.previous_ratio);
+        if (!finiteTransition(state, reward))
+          throw std::runtime_error("non-finite eel state or reward");
 
-      control_protocol_report.completed_decisions = decision_index + 1;
-      control_protocol_report.completed_ibamr_steps += interval.ibamr_steps;
-      control_protocol_report.clipped_actions = task.clippedActionCount();
-      control_protocol_report.finite_state_and_reward = true;
+        const EelLogicalStep step =
+          segments.completeDecision(environment.stepsRemaining());
+        control_protocol_report.completed_segments =
+          segments.completedSegments();
+        control_protocol_report.completed_decisions =
+          segments.totalDecisions();
+        control_protocol_report.completed_ibamr_steps += interval.ibamr_steps;
+        control_protocol_report.clipped_actions = task.clippedActionCount();
+        control_protocol_report.finite_state_and_reward = true;
 
-      const bool terminal =
-        decision_index + 1 == config.episode_decisions ||
-        !environment.stepsRemaining();
-      if (!environment.stepsRemaining()) terminal_reason = "ibamr_end_time";
-
-      int environment_rank = 0;
-      MPI_Comm_rank(environment_comm, &environment_rank);
-      if (environment_rank == 0) {
-        std::printf(
-          "EEL_CONTROL decision=%u action=%.17g target_ratio=%.17g "
-          "applied_ratio=%.17g start_time=%.17g end_time=%.17g "
-          "ibamr_steps=%u forward_velocity=%.17g reward_tracking=%.17g "
-          "reward_frequency=%.17g reward_smoothness=%.17g "
-          "reward_total=%.17g lagrangian_points=%zu\n",
-          decision_index + 1, decision.requested_action,
-          decision.target_ratio, decision.applied_ratio,
-          interval.start_time, interval.end_time, interval.ibamr_steps,
-          forward_velocity, reward.tracking, reward.frequency,
-          reward.smoothness, reward.total, lagrangian_points);
-        std::fflush(stdout);
-      }
-
-      if (terminal) {
-        comm->sendTermState(asVector(state), reward.total);
-        control_protocol_report.terminal_sent = true;
+        int environment_rank = 0;
+        MPI_Comm_rank(environment_comm, &environment_rank);
         if (environment_rank == 0) {
           std::printf(
-            "EEL_CONTROL_TERMINAL decisions=%u ibamr_steps=%u "
-            "clipped_actions=%u reason=%s\n",
-            control_protocol_report.completed_decisions,
-            control_protocol_report.completed_ibamr_steps,
-            control_protocol_report.clipped_actions, terminal_reason);
+            "EEL_CONTROL segment=%u segment_decision=%u decision=%u "
+            "action=%.17g target_ratio=%.17g applied_ratio=%.17g "
+            "start_time=%.17g end_time=%.17g ibamr_steps=%u "
+            "forward_velocity=%.17g reward_tracking=%.17g "
+            "reward_frequency=%.17g reward_smoothness=%.17g "
+            "reward_total=%.17g lagrangian_points=%zu\n",
+            step.segment, step.segment_decision, step.total_decisions,
+            decision.requested_action, decision.target_ratio,
+            decision.applied_ratio, interval.start_time, interval.end_time,
+            interval.ibamr_steps, forward_velocity, reward.tracking,
+            reward.frequency, reward.smoothness, reward.total,
+            lagrangian_points);
           std::fflush(stdout);
         }
-      }
-      else {
-        comm->sendState(asVector(state), reward.total);
-      }
 
-      if (comm->terminateTraining()) break;
+        if (step.kind == EelTransitionKind::continuing) {
+          comm->sendState(asVector(state), reward.total);
+        }
+        else {
+          comm->sendLastState(asVector(state), reward.total);
+          ++control_protocol_report.truncated_segments;
+          if (environment_rank == 0) {
+            const char* reason =
+              step.kind == EelTransitionKind::logical_horizon ?
+              "logical_horizon" : "ibamr_end_time";
+            std::printf(
+              "EEL_CONTROL_SEGMENT segment=%u decisions=%u "
+              "total_decisions=%u status=truncated reason=%s\n",
+              step.segment, step.segment_decision, step.total_decisions,
+              reason);
+            std::fflush(stdout);
+          }
+        }
+
+        if (comm->terminateTraining()) break;
+        if (step.kind == EelTransitionKind::ibamr_end_time)
+          throw std::runtime_error(
+            "IBAMR end time reached before Smarties training termination");
+      }
     }
 
-    if (control_protocol_report.terminal_sent) {
-      awaitTrainingTermination(comm, asVector(state), environment_comm,
-                               "speed-tracking");
-    }
-    if (!control_protocol_report.terminal_sent) {
+    control_protocol_report.smarties_termination_received =
+      comm->terminateTraining();
+    if (!control_protocol_report.smarties_termination_received)
       throw std::runtime_error(
-        "eel speed-tracking episode ended without a terminal transition");
+        "eel speed-tracking ended before Smarties training termination");
+
+    int environment_rank = 0;
+    MPI_Comm_rank(environment_comm, &environment_rank);
+    if (environment_rank == 0) {
+      std::printf(
+        "EEL_CONTROL_COMPLETE segments=%u decisions=%u ibamr_steps=%u "
+        "truncated_segments=%u stopped_by=smarties\n",
+        control_protocol_report.completed_segments,
+        control_protocol_report.completed_decisions,
+        control_protocol_report.completed_ibamr_steps,
+        control_protocol_report.truncated_segments);
+      std::fflush(stdout);
     }
 
     environment.shutdown();

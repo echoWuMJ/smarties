@@ -51,19 +51,19 @@ int main(int argc, char** argv)
 
     const auto report =
       ibamr_smarties::eel2d::lastControlProtocolReport();
-    const int local_terminal = report.terminal_sent ? 1 : 0;
     const int local_valid =
-      report.terminal_sent && report.completed_decisions > 1 &&
+      report.smarties_termination_received &&
+      report.completed_segments >= 1 &&
+      report.truncated_segments == report.completed_segments &&
+      report.completed_decisions >= report.completed_segments &&
       report.completed_ibamr_steps >= report.completed_decisions &&
+      report.environment_initializations == 1 &&
       report.finite_state_and_reward && report.state_dimension == 5 &&
       report.action_dimension == 1 ? 1 : 0;
-    int terminal_count = 0;
     int valid_count = 0;
-    MPI_Allreduce(&local_terminal, &terminal_count, 1, MPI_INT, MPI_SUM,
-                  MPI_COMM_WORLD);
     MPI_Allreduce(&local_valid, &valid_count, 1, MPI_INT, MPI_SUM,
                   MPI_COMM_WORLD);
-    if (terminal_count != 1 || valid_count != 1) return 95;
+    if (valid_count != 1) return 95;
 
     MPI_Finalized(&finalized);
     if (finalized != 0) return 93;

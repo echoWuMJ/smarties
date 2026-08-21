@@ -270,6 +270,10 @@ if(BUILD_IBAMR_COUPLING)
     "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/speed_tracking_protocol.conf"
     "${EEL_ENVIRONMENT_RUN_DIR}/task.conf"
     COPYONLY)
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/speed_tracking_continuing.conf"
+    "${EEL_ENVIRONMENT_RUN_DIR}/task.continuing.conf"
+    COPYONLY)
 
   add_test(
     NAME eel_environment_smoke
@@ -388,7 +392,25 @@ if(BUILD_IBAMR_COUPLING)
             ${MPIEXEC_POSTFLAGS})
   set_tests_properties(eel_control_protocol PROPERTIES
     WORKING_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}"
-    TIMEOUT 300)
+    TIMEOUT 1800)
+
+  add_test(
+    NAME eel_continuing_protocol
+    COMMAND "${CMAKE_COMMAND}"
+      "-DTEST_EXECUTABLE=$<TARGET_FILE:eel_control_protocol>"
+      "-DMPIEXEC_EXECUTABLE=${MPIEXEC_EXECUTABLE}"
+      "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+      "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
+      "-DMPIEXEC_POSTFLAGS=${MPIEXEC_POSTFLAGS}"
+      "-DINPUT_FILE=${EEL_ENVIRONMENT_RUN_DIR}/input2d"
+      "-DSETTINGS_FILE=${CMAKE_CURRENT_SOURCE_DIR}/../configs/training/cpu_learner_eel_activity.json"
+      "-DTASK_FILE=${EEL_ENVIRONMENT_RUN_DIR}/task.continuing.conf"
+      "-DVERTEX_FILE=${EEL_ENVIRONMENT_RUN_DIR}/eel2d.vertex"
+      "-DRUN_ROOT=${CMAKE_CURRENT_BINARY_DIR}/eel-continuing-protocol"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_eel_continuing_protocol.cmake")
+  set_tests_properties(eel_continuing_protocol PROPERTIES
+    WORKING_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}"
+    TIMEOUT 1920)
 
   add_test(
     NAME eel_smoke_failure_after_mpi
