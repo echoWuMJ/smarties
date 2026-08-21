@@ -123,20 +123,34 @@ configuration has been admitted.
   --fidelity medium \
   --training couplings/ibamr/configs/training/speed_tracking.json \
   --task /absolute/or/repository/relative/task.conf \
-  --train-steps 1
+  --train-steps 1 \
+  --end-time 10.0
 ```
 
 The launcher validates the task-file structure before building or launching
 MPI, copies the selected file to the run directory as `task.conf`, and passes
 only that frozen copy to the adapter. The run manifest records its SHA-256,
-the five-state/one-action dimensions, training-step budget, executable path and
-hash, and `control_stage=stage2_physical_control_experimental`.
+the five-state/one-action dimensions, both training counters, selected budget
+kind, simulation end time, executable path and hash, and
+`control_stage=stage2_physical_control_experimental`.
 
-Smarties counts `nTrainSteps` only after its initial replay-data threshold.
-Because this stage deliberately runs exactly one physical episode, the launcher
-rejects a budget larger than `episode_decisions - minTotObsNum`; such a run
-cannot reach Smarties termination without a reset. The conservative baseline
-uses `minTotObsNum=1` and `--train-steps 1`.
+`--train-steps N` retains Smarties' environment-transition meaning and passes
+`--nTrainSteps N --nTrainUpdates 0`. `--train-updates N` requests an exact
+native optimizer-update budget and passes
+`--nTrainSteps 0 --nTrainUpdates N`. Explicit step and update budgets are
+mutually exclusive; omitting both preserves the compatible default of one
+training step. The simulation end time defaults to `10.0` and can be set with
+`--end-time T`; it is rendered into the single top-level `END_TIME` assignment
+and recorded in the run manifest.
+
+The eel callback now keeps one physical IBAMR simulation alive across multiple
+logical Smarties segments. A logical horizon publishes a truncated last state,
+then starts the next replay segment from the same physical time and flow state;
+it is not an independent environment reset. If IBAMR reaches the configured end
+time before Smarties consumes its selected training budget, the adapter
+publishes the final truncated transition and exits through the coordinated
+failure path instead of reconstructing the environment or starting a second
+callback.
 
 One action in `[-1,1]` requests a configured frequency ratio; clipping and slew
 limits are applied before the command reaches `EelEnvironment`. IBAMR owns the
@@ -218,7 +232,8 @@ eel convergence, swimming efficiency, or long-horizon IBAMR stability.
 ### Medium-eel native learner activity gate
 
 After the synthetic matrix passes, the dedicated medium-eel gate checks that
-the coupled production path performs one finite native learner update:
+the coupled production path performs exactly two finite native learner updates
+across continuing logical segments:
 
 ```bash
 ./couplings/ibamr/scripts/run_node3.sh train \
@@ -226,7 +241,7 @@ the coupled production path performs one finite native learner update:
   --fidelity medium \
   --training couplings/ibamr/configs/training/cpu_learner_eel_activity.json \
   --task couplings/ibamr/tests/fixtures/speed_tracking_learner_activity.conf \
-  --train-steps 1
+  --train-updates 2 --end-time 10.0
 ```
 
 The target uses one learner rank and one two-rank IBAMR environment. Core
@@ -243,9 +258,11 @@ add evaluation transitions to replay memory, and must reproduce the final
 parameter digest while emitting finite actions. The two MPI jobs never
 overlap; `CouplingDriver` owns initialization/finalization in each job.
 
-This proves one native CPU update, the eel protocol record, clean process
-return, and checkpoint reload. The target speed and reward weights are
-diagnostic only: the result does not prove eel convergence or policy quality.
+This gate requires two finite update audit records, at least two truncated
+segment records, the official-medium Lagrangian point count, one Smarties-owned
+completion, clean process return, and a matching checkpoint reload. It does not
+provide independent environment reset, a calibrated control target, policy
+quality, convergence, swimming-efficiency, or long-duration stability evidence.
 It does not enable PyTorch, CUDA, pybind11, or Python bindings. Registration is
 opt-in through `IBAMR_SMARTIES_ENABLE_NODE3_EEL_LEARNER_ACTIVITY=ON`; the test
 is labelled `physical;node3;learner` and is absent from ordinary CTest.

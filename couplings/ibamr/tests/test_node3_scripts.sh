@@ -129,8 +129,8 @@ activity_minimum=$(sed -n \
   fail "eel learner activity settings must freeze batch/minimum at 4"
 grep -Eq '^[[:space:]]*warmup_cycles[[:space:]]*=[[:space:]]*0([.]0)?[[:space:]]*$' \
   "$activity_task" || fail "eel learner activity warmup must be zero"
-grep -Eq '^[[:space:]]*episode_decisions[[:space:]]*=[[:space:]]*5[[:space:]]*$' \
-  "$activity_task" || fail "eel learner activity episode must have five decisions"
+grep -Eq '^[[:space:]]*episode_decisions[[:space:]]*=[[:space:]]*2[[:space:]]*$' \
+  "$activity_task" || fail "eel learner activity segment must have two decisions"
 if grep -Eiq 'pytorch|torch|cuda|pybind' "$activity_settings"; then
   fail "eel learner activity settings enable a forbidden backend"
 fi
@@ -204,7 +204,41 @@ assert_contains "$output" "CONTROL_STAGE=stage2_physical_control_experimental"
 assert_contains "$output" "--eel-mode speed-tracking"
 assert_contains "$output" "--task-file task.conf"
 assert_contains "$output" "--nTrainSteps 1"
+assert_contains "$output" "--nTrainUpdates 0"
 assert_contains "$output" "--nThreads 1"
+
+output=$(bash "$run_script" train --dry-run --envs 1 --ranks-per-env 2 \
+  --learner-threads 2 --fidelity medium \
+  --training couplings/ibamr/configs/training/cpu_learner_eel_activity.json \
+  --task couplings/ibamr/tests/fixtures/speed_tracking_learner_activity.conf \
+  --train-updates 2 --end-time 12.5)
+assert_contains "$output" "--nTrainSteps 0"
+assert_contains "$output" "--nTrainUpdates 2"
+assert_contains "$output" "SIMULATION_END_TIME=12.5"
+
+if capture_status "$fixture_root/train-budget-conflict.log" \
+  bash "$run_script" train --dry-run --envs 1 --ranks-per-env 2 \
+    --fidelity medium \
+    --training couplings/ibamr/configs/training/cpu_learner_eel_activity.json \
+    --task couplings/ibamr/tests/fixtures/speed_tracking_learner_activity.conf \
+    --train-steps 1 --train-updates 2; then
+  fail "train accepted both explicit training budgets"
+fi
+assert_contains "$(<"$fixture_root/train-budget-conflict.log")" \
+  "choose exactly one training budget"
+
+for invalid_end_time in 0 -1 NaN infinity 1e9999; do
+  log="$fixture_root/end-time-${invalid_end_time//[^A-Za-z0-9]/_}.log"
+  if capture_status "$log" \
+    bash "$run_script" train --dry-run --envs 1 --ranks-per-env 2 \
+      --fidelity medium \
+      --training couplings/ibamr/configs/training/cpu_learner_eel_activity.json \
+      --task couplings/ibamr/tests/fixtures/speed_tracking_learner_activity.conf \
+      --train-updates 2 --end-time "$invalid_end_time"; then
+    fail "train accepted invalid --end-time $invalid_end_time"
+  fi
+  assert_contains "$(<"$log")" "--end-time must be a positive finite number"
+done
 
 output=$(bash "$run_script" train --dry-run --envs 1 --ranks-per-env 2 \
   --learner-threads 4 --fidelity medium \
@@ -280,16 +314,14 @@ fi
 assert_contains "$(<"$fixture_root/train-steps-zero.log")" \
   "--train-steps must be a positive integer"
 
-if capture_status "$fixture_root/train-steps-unreachable.log" \
-  bash "$run_script" train --dry-run --envs 1 --ranks-per-env 1 \
+output=$(bash "$run_script" train --dry-run --envs 1 --ranks-per-env 1 \
   --fidelity medium \
   --training couplings/ibamr/configs/training/speed_tracking.json \
   --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf \
-  --train-steps 2; then
-  fail "train accepted a step budget unreachable in one physical episode"
-fi
-assert_contains "$(<"$fixture_root/train-steps-unreachable.log")" \
-  "cannot finish within one physical episode"
+  --train-steps 2)
+assert_contains "$output" "COMMAND="
+assert_contains "$output" "--nTrainSteps 2"
+assert_contains "$output" "--nTrainUpdates 0"
 
 fixture_source="$fixture_root/smarties-fixture-0123456789ab"
 fixture_build="$fixture_root/build-real"
@@ -337,13 +369,19 @@ if [[ $audit != none ]]; then
   cat >"$audit/learner_audit.log" <<'AUDIT'
 SMARTIES_NETWORK_AUDIT stage=initialized network=agent_00_network0 step=0 threads=4 precision_bytes=4 params=544 digest=1111111111111111 sum=0 sum_squares=1 max_abs=1 finite=1
 SMARTIES_NETWORK_AUDIT stage=update network=agent_00_network0 step=1 threads=4 precision_bytes=4 params=544 digest=2222222222222222 sum=0 sum_squares=1 max_abs=1 finite=1
-SMARTIES_NETWORK_AUDIT stage=final network=agent_00_network0 step=1 threads=4 precision_bytes=4 params=544 digest=2222222222222222 sum=0 sum_squares=1 max_abs=1 finite=1
+SMARTIES_NETWORK_AUDIT stage=update network=agent_00_network0 step=2 threads=4 precision_bytes=4 params=544 digest=3333333333333333 sum=0 sum_squares=1 max_abs=1 finite=1
+SMARTIES_NETWORK_AUDIT stage=final network=agent_00_network0 step=2 threads=4 precision_bytes=4 params=544 digest=3333333333333333 sum=0 sum_squares=1 max_abs=1 finite=1
 AUDIT
-  for decision in 1 2 3 4 5; do
-    printf 'EEL_CONTROL decision=%s action=0 target_ratio=1 applied_ratio=1 start_time=0 end_time=0.1 ibamr_steps=100 forward_velocity=0 reward_tracking=-0.1 reward_frequency=0 reward_smoothness=0 reward_total=-0.1 lagrangian_points=2932\n' "$decision"
-  done
-  printf 'EEL_CONTROL_TERMINAL decisions=5 ibamr_steps=500 clipped_actions=0 reason=episode_horizon\n'
+  printf 'EEL_CONTROL segment=1 segment_decision=1 decision=1 action=0 target_ratio=1 applied_ratio=1 start_time=0 end_time=0.1 ibamr_steps=100 forward_velocity=0 reward_tracking=-0.1 reward_frequency=0 reward_smoothness=0 reward_total=-0.1 lagrangian_points=2932\n'
+  printf 'EEL_CONTROL segment=1 segment_decision=2 decision=2 action=0 target_ratio=1 applied_ratio=1 start_time=0.1 end_time=0.2 ibamr_steps=100 forward_velocity=0 reward_tracking=-0.1 reward_frequency=0 reward_smoothness=0 reward_total=-0.1 lagrangian_points=2932\n'
+  printf 'EEL_CONTROL_SEGMENT segment=1 decisions=2 total_decisions=2 status=truncated reason=logical_horizon\n'
+  printf 'EEL_CONTROL segment=2 segment_decision=1 decision=3 action=0 target_ratio=1 applied_ratio=1 start_time=0.2 end_time=0.3 ibamr_steps=100 forward_velocity=0 reward_tracking=-0.1 reward_frequency=0 reward_smoothness=0 reward_total=-0.1 lagrangian_points=2932\n'
+  printf 'EEL_CONTROL segment=2 segment_decision=2 decision=4 action=0 target_ratio=1 applied_ratio=1 start_time=0.3 end_time=0.4 ibamr_steps=100 forward_velocity=0 reward_tracking=-0.1 reward_frequency=0 reward_smoothness=0 reward_total=-0.1 lagrangian_points=2932\n'
+  printf 'EEL_CONTROL_SEGMENT segment=2 decisions=2 total_decisions=4 status=truncated reason=logical_horizon\n'
+  printf 'EEL_CONTROL_COMPLETE segments=2 decisions=4 ibamr_steps=400 truncated_segments=2 stopped_by=smarties\n'
 fi
+printf 'COUPLING_DRIVER_RETURNED_MPI_ACTIVE\n'
+printf 'COUPLING_DRIVER_DESTROYED_MPI_FINALIZED\n'
 printf 'fixture coupling completed\n'
 EOF
 chmod +x "$fixture_build/couplings/ibamr/ibamr_eel2d_smoke"
@@ -358,7 +396,7 @@ while (($#)); do
 done
 mkdir -p "$audit"
 cat >"$audit/learner_audit.log" <<'AUDIT'
-SMARTIES_NETWORK_AUDIT stage=restart network=agent_00_network0 step=1 threads=4 precision_bytes=4 params=544 digest=2222222222222222 sum=0 sum_squares=1 max_abs=1 finite=1
+SMARTIES_NETWORK_AUDIT stage=restart network=agent_00_network0 step=2 threads=4 precision_bytes=4 params=544 digest=3333333333333333 sum=0 sum_squares=1 max_abs=1 finite=1
 AUDIT
 printf 'SMARTIES_SYNTHETIC_STEP seed=11 environment=1 episode=1 decision=1 action=0 target=0 reward=0 squared_error=0 terminal=0 finite=1\n'
 printf 'COUPLING_DRIVER_RETURNED_MPI_ACTIVE\n'
@@ -473,6 +511,9 @@ assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
   "task_sha256=$train_task_sha"
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" "train_steps=1"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" "train_updates=0"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" "train_budget_kind=steps"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" "simulation_end_time=10.0"
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" "state_dimension=5"
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" "action_dimension=1"
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
@@ -493,7 +534,7 @@ output=$(bash "$run_script" train --source "$fixture_source" \
   --learner-threads 4 --fidelity medium \
   --training couplings/ibamr/configs/training/cpu_learner_eel_activity.json \
   --task couplings/ibamr/configs/tasks/speed_tracking_learner_activity.conf \
-  --train-steps 1)
+  --train-updates 2)
 assert_contains "$output" "EEL_LEARNER_ACTIVITY verdict=PASS"
 activity_run_dir=$(printf '%s\n' "$output" | sed -n 's/^RUN_DIRECTORY=//p')
 [[ -f $activity_run_dir/restart-audit/learner_audit.log ]] ||
@@ -502,6 +543,10 @@ activity_run_dir=$(printf '%s\n' "$output" | sed -n 's/^RUN_DIRECTORY=//p')
   fail "eel learner activity restart status was not zero"
 assert_contains "$(<"$activity_run_dir/manifest.txt")" "learner_threads=4"
 assert_contains "$(<"$activity_run_dir/manifest.txt")" "learner_activity_gate=1"
+assert_contains "$(<"$activity_run_dir/manifest.txt")" "train_steps=0"
+assert_contains "$(<"$activity_run_dir/manifest.txt")" "train_updates=2"
+assert_contains "$(<"$activity_run_dir/manifest.txt")" "train_budget_kind=updates"
+assert_contains "$(<"$activity_run_dir/manifest.txt")" "simulation_end_time=10.0"
 assert_contains "$(<"$activity_run_dir/manifest.txt")" \
   "command=mpiexec --bind-to core --map-by slot:PE=4 -n 3"
 
@@ -511,7 +556,7 @@ FAKE_EEL_RESIDUAL=1 bash "$run_script" train --source "$fixture_source" \
   --learner-threads 4 --fidelity medium \
   --training couplings/ibamr/configs/training/cpu_learner_eel_activity.json \
   --task couplings/ibamr/configs/tasks/speed_tracking_learner_activity.conf \
-  --train-steps 1 >"$fixture_root/eel-residual.log" 2>&1
+  --train-updates 2 >"$fixture_root/eel-residual.log" 2>&1
 eel_residual_status=$?
 set -e
 eel_residual_output=$(<"$fixture_root/eel-residual.log")
@@ -630,15 +675,21 @@ printf '0\n' >"$activity_valid/restart_exit_code.txt"
 cat >"$activity_valid/learner-audit/learner_audit.log" <<'EOF'
 SMARTIES_NETWORK_AUDIT stage=initialized network=agent_00_network0 step=0 threads=4 precision_bytes=4 params=544 digest=1111111111111111 sum=0 sum_squares=1 max_abs=1 finite=1
 SMARTIES_NETWORK_AUDIT stage=update network=agent_00_network0 step=1 threads=4 precision_bytes=4 params=544 digest=2222222222222222 sum=0 sum_squares=1 max_abs=1 finite=1
-SMARTIES_NETWORK_AUDIT stage=final network=agent_00_network0 step=1 threads=4 precision_bytes=4 params=544 digest=2222222222222222 sum=0 sum_squares=1 max_abs=1 finite=1
+SMARTIES_NETWORK_AUDIT stage=update network=agent_00_network0 step=2 threads=4 precision_bytes=4 params=544 digest=3333333333333333 sum=0 sum_squares=1 max_abs=1 finite=1
+SMARTIES_NETWORK_AUDIT stage=final network=agent_00_network0 step=2 threads=4 precision_bytes=4 params=544 digest=3333333333333333 sum=0 sum_squares=1 max_abs=1 finite=1
 EOF
 cat >"$activity_valid/restart-audit/learner_audit.log" <<'EOF'
-SMARTIES_NETWORK_AUDIT stage=restart network=agent_00_network0 step=1 threads=4 precision_bytes=4 params=544 digest=2222222222222222 sum=0 sum_squares=1 max_abs=1 finite=1
+SMARTIES_NETWORK_AUDIT stage=restart network=agent_00_network0 step=2 threads=4 precision_bytes=4 params=544 digest=3333333333333333 sum=0 sum_squares=1 max_abs=1 finite=1
 EOF
-for decision in 1 2 3 4 5; do
-  printf 'EEL_CONTROL decision=%s action=0 target_ratio=1 applied_ratio=1 start_time=0 end_time=0.1 ibamr_steps=100 forward_velocity=0 reward_tracking=-0.1 reward_frequency=0 reward_smoothness=0 reward_total=-0.1 lagrangian_points=2932\n' "$decision"
-done >"$activity_valid/stdout.log"
-printf 'EEL_CONTROL_TERMINAL decisions=5 ibamr_steps=500 clipped_actions=0 reason=episode_horizon\n' >>"$activity_valid/stdout.log"
+cat >"$activity_valid/stdout.log" <<'EOF'
+EEL_CONTROL segment=1 segment_decision=1 decision=1 action=0 target_ratio=1 applied_ratio=1 start_time=0 end_time=0.1 ibamr_steps=100 forward_velocity=0 reward_tracking=-0.1 reward_frequency=0 reward_smoothness=0 reward_total=-0.1 lagrangian_points=2932
+EEL_CONTROL segment=1 segment_decision=2 decision=2 action=0 target_ratio=1 applied_ratio=1 start_time=0.1 end_time=0.2 ibamr_steps=100 forward_velocity=0 reward_tracking=-0.1 reward_frequency=0 reward_smoothness=0 reward_total=-0.1 lagrangian_points=2932
+EEL_CONTROL_SEGMENT segment=1 decisions=2 total_decisions=2 status=truncated reason=logical_horizon
+EEL_CONTROL segment=2 segment_decision=1 decision=3 action=0 target_ratio=1 applied_ratio=1 start_time=0.2 end_time=0.3 ibamr_steps=100 forward_velocity=0 reward_tracking=-0.1 reward_frequency=0 reward_smoothness=0 reward_total=-0.1 lagrangian_points=2932
+EEL_CONTROL segment=2 segment_decision=2 decision=4 action=0 target_ratio=1 applied_ratio=1 start_time=0.3 end_time=0.4 ibamr_steps=100 forward_velocity=0 reward_tracking=-0.1 reward_frequency=0 reward_smoothness=0 reward_total=-0.1 lagrangian_points=2932
+EEL_CONTROL_SEGMENT segment=2 decisions=2 total_decisions=4 status=truncated reason=logical_horizon
+EEL_CONTROL_COMPLETE segments=2 decisions=4 ibamr_steps=400 truncated_segments=2 stopped_by=smarties
+EOF
 cat >"$activity_valid/restart_stdout.log" <<'EOF'
 SMARTIES_SYNTHETIC_STEP seed=11 environment=1 episode=1 decision=1 action=0 target=0 reward=0 squared_error=0 terminal=0 finite=1
 COUPLING_DRIVER_RETURNED_MPI_ACTIVE
@@ -675,7 +726,7 @@ activity_expect missing-update "$activity_case" UPDATE_NOT_OBSERVED 1
 
 activity_case="$fixture_root/activity-unchanged"
 cp -R "$activity_valid" "$activity_case"
-sed -i 's/stage=final\(.*\)digest=2222222222222222/stage=final\1digest=1111111111111111/' \
+sed -i 's/stage=final\(.*\)digest=3333333333333333/stage=final\1digest=1111111111111111/' \
   "$activity_case/learner-audit/learner_audit.log"
 activity_expect unchanged "$activity_case" UPDATE_NOT_OBSERVED 1
 
@@ -693,12 +744,23 @@ activity_expect points "$activity_case" COUPLING_PROTOCOL_FAILURE 1
 
 activity_case="$fixture_root/activity-terminal"
 cp -R "$activity_valid" "$activity_case"
-sed -i '/^EEL_CONTROL_TERMINAL /d' "$activity_case/stdout.log"
+printf 'EEL_CONTROL_TERMINAL decisions=4 ibamr_steps=400 reason=episode_horizon\n' \
+  >>"$activity_case/stdout.log"
 activity_expect terminal "$activity_case" COUPLING_PROTOCOL_FAILURE 1
+
+activity_case="$fixture_root/activity-missing-complete"
+cp -R "$activity_valid" "$activity_case"
+sed -i '/^EEL_CONTROL_COMPLETE /d' "$activity_case/stdout.log"
+activity_expect missing-complete "$activity_case" COUPLING_PROTOCOL_FAILURE 1
+
+activity_case="$fixture_root/activity-missing-segment"
+cp -R "$activity_valid" "$activity_case"
+sed -i '/^EEL_CONTROL_SEGMENT segment=2 /d' "$activity_case/stdout.log"
+activity_expect missing-segment "$activity_case" COUPLING_PROTOCOL_FAILURE 1
 
 activity_case="$fixture_root/activity-restart"
 cp -R "$activity_valid" "$activity_case"
-sed -i 's/digest=2222222222222222/digest=3333333333333333/' \
+sed -i 's/digest=3333333333333333/digest=4444444444444444/' \
   "$activity_case/restart-audit/learner_audit.log"
 activity_expect restart "$activity_case" CHECKPOINT_MISMATCH 1
 

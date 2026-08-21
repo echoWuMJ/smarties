@@ -30,10 +30,12 @@ Smoke options:
 Train options additionally require:
   --task FILE              Validated eel control task configuration
   --train-steps N          Positive post-startup data-step budget (default: 1)
+  --train-updates N        Positive native optimizer-update budget
+  --end-time T             Positive finite simulation end time (default: 10.0)
 
 Smoke validates process ownership and the communication lifecycle. Train runs
-the stage-two, one-physical-episode frequency-control path with Smarties' native
-CPU learner; it does not establish policy quality or reset support.
+the stage-two continuing frequency-control path with Smarties' native CPU
+learner; it does not establish policy quality or independent reset support.
 EOF
 }
 
@@ -148,6 +150,10 @@ learner_threads=1
 fidelity=medium
 smoke_steps=1
 train_steps=1
+train_updates=0
+train_steps_explicit=0
+train_updates_explicit=0
+simulation_end_time=10.0
 task=
 build_dir=
 dry_run=0
@@ -167,7 +173,7 @@ action_dimension=1
 
 while (($#)); do
   case $1 in
-    --envs|--ranks-per-env|--learner-ranks|--learner-threads|--fidelity|--training|--smoke-steps|--train-steps|--task|--source|--build)
+    --envs|--ranks-per-env|--learner-ranks|--learner-threads|--fidelity|--training|--smoke-steps|--train-steps|--train-updates|--end-time|--task|--source|--build)
       (($# >= 2)) || die "missing value after $1"
       option=$1
       value=$2
@@ -181,7 +187,15 @@ while (($#)); do
         --fidelity) fidelity=$value ;;
         --training) training=$value ;;
         --smoke-steps) smoke_steps=$value ;;
-        --train-steps) train_steps=$value ;;
+        --train-steps)
+          train_steps=$value
+          train_steps_explicit=1
+          ;;
+        --train-updates)
+          train_updates=$value
+          train_updates_explicit=1
+          ;;
+        --end-time) simulation_end_time=$value ;;
         --task) task=$value ;;
         --source) source_dir=$value ;;
         --build) build_dir=$value ;;
@@ -216,9 +230,25 @@ is_positive_integer "$learner_threads" ||
 is_positive_integer "$smoke_steps" ||
   die "--smoke-steps must be a positive integer"
 if [[ $mode == train ]]; then
-  is_positive_integer "$train_steps" ||
-    die "--train-steps must be a positive integer"
+  if ((train_steps_explicit && train_updates_explicit)); then
+    die "choose exactly one training budget: --train-steps or --train-updates"
+  fi
+  if ((train_updates_explicit)); then
+    is_positive_integer "$train_updates" ||
+      die "--train-updates must be a positive integer"
+  else
+    is_positive_integer "$train_steps" ||
+      die "--train-steps must be a positive integer"
+  fi
   [[ -n $task ]] || die "--task is required for train mode"
+fi
+if [[ ! $simulation_end_time =~ ^[+-]?(([0-9]+([.][0-9]*)?)|([.][0-9]+))([eE][+-]?[0-9]+)?$ ]] ||
+   ! awk -v value="$simulation_end_time" 'BEGIN {
+       numeric = value + 0
+       rendered = sprintf("%.17g", numeric)
+       if (!(numeric > 0) || tolower(rendered) ~ /(inf|nan)/) exit 1
+     }'; then
+  die "--end-time must be a positive finite number"
 fi
 if [[ $fidelity != medium ]]; then
   die "only medium is supported for physical eel2d runs"
@@ -271,11 +301,6 @@ if [[ $mode == train ]]; then
   ' "$task" | tail -n 1)
   is_positive_integer "$episode_decisions" ||
     die "task configuration has invalid episode_decisions: $task"
-  maximum_single_episode_train_steps=$((episode_decisions - minimum_training_observations))
-  if ((maximum_single_episode_train_steps < 1 ||
-       train_steps > maximum_single_episode_train_steps)); then
-    die "--train-steps $train_steps cannot finish within one physical episode (episode_decisions=$episode_decisions, minTotObsNum=$minimum_training_observations)"
-  fi
 else
   batch_size=not-applicable
 fi
@@ -394,18 +419,26 @@ mpi_version=$(mpiexec --version 2>&1 | sed -n '1p')
 mpicc_command=$(mpicc --showme:command)
 mpicxx_command=$(mpicxx --showme:command)
 env_script_used=${SMARTIES_IBAMR_ENV_SCRIPT:-$DEFAULT_ENV_SCRIPT}
-if [[ $mode == train ]]; then
+if [[ $mode == train && $train_updates_explicit == 1 ]]; then
+  effective_train_steps=0
+  effective_train_updates=$train_updates
+  train_budget_kind=updates
+elif [[ $mode == train ]]; then
   effective_train_steps=$train_steps
+  effective_train_updates=0
+  train_budget_kind=steps
 else
   effective_train_steps=0
+  effective_train_updates=0
+  train_budget_kind=not-applicable
 fi
 learner_activity_gate=0
 if [[ $mode == train &&
       $(basename "$training") == cpu_learner_eel_activity.json ]]; then
   [[ $(basename "$task") == speed_tracking_learner_activity.conf ]] ||
     die "cpu_learner_eel_activity.json requires speed_tracking_learner_activity.conf"
-  [[ $train_steps == 1 ]] ||
-    die "eel learner activity gate requires --train-steps 1"
+  [[ $train_budget_kind == updates && $effective_train_updates == 2 ]] ||
+    die "eel learner activity gate requires --train-updates 2"
   learner_activity_gate=1
 fi
 
@@ -416,6 +449,7 @@ launch_args=(
   --workerProcessesPerEnv "$ranks_per_env"
   --learnersOnWorkers 0
   --nTrainSteps "$effective_train_steps"
+  --nTrainUpdates "$effective_train_updates"
   --restart none
   --setupFolder .
   --input-file input2d
@@ -462,6 +496,10 @@ printf 'CONTROL_STAGE=%s\n' "$control_stage"
 printf 'BUILD_STATUS=%s\n' "$build_status"
 printf 'BUILD_REVISION=%s\n' "$build_revision"
 printf 'NETWORK_PRECISION_BYTES=%s\n' "$network_precision_bytes"
+printf 'TRAIN_STEPS=%s\n' "$effective_train_steps"
+printf 'TRAIN_UPDATES=%s\n' "$effective_train_updates"
+printf 'TRAIN_BUDGET_KIND=%s\n' "$train_budget_kind"
+printf 'SIMULATION_END_TIME=%s\n' "$simulation_end_time"
 printf 'COMMAND='
 printf '%q ' "${command[@]}"
 printf '\n'
@@ -480,7 +518,9 @@ render_fidelity()
   local output=$2
   local config="$fidelity_dir/$level.conf"
   [[ -f "$config" ]] || die "fidelity config not found: $config"
-  cmake -D"FIDELITY_FILE=$config" -D"OUTPUT_FILE=$output" -P "$render_script"
+  cmake -D"FIDELITY_FILE=$config" \
+    -D"EEL_END_TIME=$simulation_end_time" \
+    -D"OUTPUT_FILE=$output" -P "$render_script"
 }
 
 render_fidelity "$fidelity" "$run_dir/input2d"
@@ -540,6 +580,9 @@ manifest="$run_dir/manifest.txt"
   printf 'task_file=%s\n' "$task_file_manifest"
   printf 'task_sha256=%s\n' "$task_sha256"
   printf 'train_steps=%s\n' "$effective_train_steps"
+  printf 'train_updates=%s\n' "$effective_train_updates"
+  printf 'train_budget_kind=%s\n' "$train_budget_kind"
+  printf 'simulation_end_time=%s\n' "$simulation_end_time"
   printf 'state_dimension=%s\n' "$state_dimension"
   printf 'action_dimension=%s\n' "$action_dimension"
   printf 'control_stage=%s\n' "$control_stage"

@@ -249,12 +249,14 @@ if(BUILD_IBAMR_COUPLING)
   execute_process(
     COMMAND "${CMAKE_COMMAND}"
       "-DFIDELITY_FILE=${CMAKE_CURRENT_SOURCE_DIR}/../configs/fidelity/coarse.conf"
+      "-DEEL_END_TIME=10.0"
       "-DOUTPUT_FILE=${EEL_ENVIRONMENT_RUN_DIR}/input2d.coarse"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/render_input.cmake"
     COMMAND_ERROR_IS_FATAL ANY)
   execute_process(
     COMMAND "${CMAKE_COMMAND}"
       "-DFIDELITY_FILE=${CMAKE_CURRENT_SOURCE_DIR}/../configs/fidelity/medium.conf"
+      "-DEEL_END_TIME=10.0"
       "-DOUTPUT_FILE=${EEL_ENVIRONMENT_RUN_DIR}/input2d"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/render_input.cmake"
     COMMAND_ERROR_IS_FATAL ANY)
@@ -444,7 +446,7 @@ if(BUILD_IBAMR_COUPLING)
           couplings/ibamr/configs/training/cpu_learner_eel_activity.json
         --task
           couplings/ibamr/tests/fixtures/speed_tracking_learner_activity.conf
-        --train-steps 1)
+        --train-updates 2)
     set_tests_properties(eel_learner_activity_node3 PROPERTIES
       LABELS "physical;node3;learner"
       RUN_SERIAL TRUE
