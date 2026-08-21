@@ -660,6 +660,14 @@ activity_expect()
 
 activity_expect valid "$activity_valid" PASS 0
 
+activity_nested="$fixture_root/activity-valid-nested-output"
+cp -R "$activity_valid" "$activity_nested"
+mkdir -p "$activity_nested/simulation_000_00000"
+mv "$activity_nested/stdout.log" \
+  "$activity_nested/simulation_000_00000/output_000"
+: >"$activity_nested/stdout.log"
+activity_expect nested-output "$activity_nested" PASS 0
+
 activity_case="$fixture_root/activity-missing-update"
 cp -R "$activity_valid" "$activity_case"
 sed -i '/ stage=update /d' "$activity_case/learner-audit/learner_audit.log"

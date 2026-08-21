@@ -119,11 +119,25 @@ if(NOT final_signature STREQUAL restart_signature)
     "reloaded synthetic policy digest differs from eel final digest")
 endif()
 
-if(NOT EXISTS "${RUN_DIR}/stdout.log")
-  activity_failure(COUPLING_PROTOCOL_FAILURE "missing eel stdout")
+file(GLOB application_outputs "${RUN_DIR}/simulation_*/output_*")
+if(application_outputs)
+  set(control_logs ${application_outputs})
+elseif(EXISTS "${RUN_DIR}/stdout.log")
+  set(control_logs "${RUN_DIR}/stdout.log")
+else()
+  activity_failure(COUPLING_PROTOCOL_FAILURE "missing eel control output")
 endif()
-file(STRINGS "${RUN_DIR}/stdout.log" transitions
-     REGEX "^EEL_CONTROL decision=")
+
+set(transitions)
+set(terminals)
+foreach(control_log IN LISTS control_logs)
+  file(STRINGS "${control_log}" log_transitions
+       REGEX "^EEL_CONTROL decision=")
+  file(STRINGS "${control_log}" log_terminals
+       REGEX "^EEL_CONTROL_TERMINAL ")
+  list(APPEND transitions ${log_transitions})
+  list(APPEND terminals ${log_terminals})
+endforeach()
 list(LENGTH transitions decision_count)
 if(NOT decision_count EQUAL 5)
   activity_failure(COUPLING_PROTOCOL_FAILURE
@@ -141,8 +155,6 @@ foreach(line IN LISTS transitions)
       "eel transition contains non-finite data")
   endif()
 endforeach()
-file(STRINGS "${RUN_DIR}/stdout.log" terminals
-     REGEX "^EEL_CONTROL_TERMINAL ")
 list(LENGTH terminals terminal_count)
 if(NOT terminal_count EQUAL 1)
   activity_failure(COUPLING_PROTOCOL_FAILURE
