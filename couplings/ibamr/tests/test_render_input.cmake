@@ -72,6 +72,45 @@ function(assert_rendered_fidelity NAME EXPECTED_N EXPECTED_LEVELS EXPECTED_RATIO
   endif()
 endfunction()
 
+function(assert_end_time_rejected VALUE LABEL)
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIDELITY_FILE=${COUPLING_ROOT}/configs/fidelity/medium.conf"
+      "-DEEL_END_TIME=${VALUE}"
+      "-DOUTPUT_FILE=${OUTPUT_DIR}/invalid-${LABEL}"
+      -P "${RENDERER}"
+    RESULT_VARIABLE RESULT
+    OUTPUT_QUIET ERROR_QUIET)
+  if(RESULT EQUAL 0)
+    message(FATAL_ERROR "renderer accepted invalid EEL_END_TIME=${VALUE}")
+  endif()
+endfunction()
+
+function(assert_end_time_preserved VALUE LABEL)
+  set(OUTPUT "${OUTPUT_DIR}/valid-${LABEL}")
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIDELITY_FILE=${COUPLING_ROOT}/configs/fidelity/medium.conf"
+      "-DEEL_END_TIME=${VALUE}"
+      "-DOUTPUT_FILE=${OUTPUT}"
+      -P "${RENDERER}"
+    RESULT_VARIABLE RESULT)
+  if(NOT RESULT EQUAL 0)
+    message(FATAL_ERROR "renderer rejected valid EEL_END_TIME=${VALUE}")
+  endif()
+  file(STRINGS "${OUTPUT}" ASSIGNMENTS REGEX "^END_TIME[ \t]*=")
+  list(LENGTH ASSIGNMENTS ASSIGNMENT_COUNT)
+  if(NOT ASSIGNMENT_COUNT EQUAL 1)
+    message(FATAL_ERROR
+      "renderer emitted ${ASSIGNMENT_COUNT} top-level END_TIME assignments")
+  endif()
+  list(GET ASSIGNMENTS 0 ASSIGNMENT)
+  if(NOT ASSIGNMENT STREQUAL "END_TIME = ${VALUE}")
+    message(FATAL_ERROR
+      "renderer did not preserve exact EEL_END_TIME=${VALUE}")
+  endif()
+endfunction()
+
 assert_rendered_fidelity(coarse 32 2 4)
 assert_rendered_fidelity(medium 64 3 4)
 assert_rendered_fidelity(fine 128 3 4)
@@ -98,6 +137,14 @@ execute_process(
 if(ZERO_END_TIME_RESULT EQUAL 0)
   message(FATAL_ERROR "renderer accepted EEL_END_TIME=0")
 endif()
+
+assert_end_time_rejected("-1" negative)
+assert_end_time_rejected("NaN" nan)
+assert_end_time_rejected("Inf" infinity)
+assert_end_time_rejected("1e9999" overflow)
+assert_end_time_rejected("1e-9999" underflow)
+assert_end_time_preserved("12.5" decimal)
+assert_end_time_preserved("1.25e1" scientific)
 
 file(SHA256 "${TEMPLATE}" HASH_AFTER)
 if(NOT HASH_BEFORE STREQUAL HASH_AFTER)

@@ -41,14 +41,24 @@ for argument in "$@"; do
     exec "$REAL_CMAKE" "$@"
   fi
 done
+output=
+end_time=
 for argument in "$@"; do
   case $argument in
     -DOUTPUT_FILE=*)
       output=${argument#-DOUTPUT_FILE=}
-      printf 'rendered fixture input\n' >"$output"
       ;;
+    -DEEL_END_TIME=*) end_time=${argument#-DEEL_END_TIME=} ;;
   esac
 done
+if [[ -n $output ]]; then
+  [[ -n $end_time ]] || {
+    printf 'fixture cmake: missing -DEEL_END_TIME for %s\n' "$output" >&2
+    exit 65
+  }
+  printf 'rendered fixture input\n' >"$output"
+  printf '%s|%s\n' "$output" "$end_time" >>"$FAKE_CMAKE_RENDER_LOG"
+fi
 EOF
 cat >"$fixture_root/bin/mpiexec" <<'EOF'
 #!/usr/bin/env bash
@@ -70,6 +80,8 @@ cp "$(command -v sleep)" "$fixture_root/bin/prterun"
 chmod +x "$fixture_root/bin/prterun"
 export FAKE_EEL_PRTERUN="$fixture_root/bin/prterun"
 export FAKE_EEL_RESIDUAL_PID_FILE="$fixture_root/eel-residual.pid"
+export FAKE_CMAKE_RENDER_LOG="$fixture_root/render.log"
+: >"$FAKE_CMAKE_RENDER_LOG"
 
 cat >"$fixture_root/enable.sh" <<EOF
 export PATH="$fixture_root/bin:\$PATH"
@@ -493,11 +505,14 @@ assert_contains "$(<"$real_run_dir/manifest.txt")" \
 assert_contains "$(<"$real_run_dir/manifest.txt")" "eel_mode=smoke"
 assert_contains "$(<"$real_run_dir/manifest.txt")" "state_dimension=1"
 assert_contains "$(<"$real_run_dir/manifest.txt")" "action_dimension=1"
+assert_contains "$(<"$FAKE_CMAKE_RENDER_LOG")" \
+  "$real_run_dir/input2d|10.0"
 
 output=$(bash "$run_script" train --source "$fixture_source" \
   --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity medium \
   --training couplings/ibamr/configs/training/speed_tracking.json \
-  --task couplings/ibamr/configs/tasks/task.conf --train-steps 1)
+  --task couplings/ibamr/configs/tasks/task.conf --train-steps 1 \
+  --end-time 12.5)
 assert_contains "$output" "fixture coupling completed"
 assert_contains "$output" "CONTROL_STAGE=stage2_physical_control_experimental"
 real_train_run_dir=$(printf '%s\n' "$output" | sed -n 's/^RUN_DIRECTORY=//p')
@@ -513,7 +528,9 @@ assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" "train_steps=1"
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" "train_updates=0"
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" "train_budget_kind=steps"
-assert_contains "$(<"$real_train_run_dir/manifest.txt")" "simulation_end_time=10.0"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" "simulation_end_time=12.5"
+assert_contains "$(<"$FAKE_CMAKE_RENDER_LOG")" \
+  "$real_train_run_dir/input2d|12.5"
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" "state_dimension=5"
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" "action_dimension=1"
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
@@ -536,6 +553,10 @@ output=$(bash "$run_script" train --source "$fixture_source" \
   --task couplings/ibamr/configs/tasks/speed_tracking_learner_activity.conf \
   --train-updates 2)
 assert_contains "$output" "EEL_LEARNER_ACTIVITY verdict=PASS"
+restart_command=$(printf '%s\n' "$output" | \
+  sed -n 's/^CHECKPOINT_RELOAD_COMMAND=//p')
+assert_contains "$restart_command" "--nTrainSteps 0"
+assert_contains "$restart_command" "--nTrainUpdates 0"
 activity_run_dir=$(printf '%s\n' "$output" | sed -n 's/^RUN_DIRECTORY=//p')
 [[ -f $activity_run_dir/restart-audit/learner_audit.log ]] ||
   fail "eel learner activity run did not archive restart audit"

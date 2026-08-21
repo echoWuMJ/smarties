@@ -24,6 +24,23 @@ string(REGEX REPLACE "0" "" EEL_END_TIME_NONZERO "${EEL_END_TIME_DIGITS}")
 if(EEL_END_TIME_NONZERO STREQUAL "")
   message(FATAL_ERROR "EEL_END_TIME must be greater than zero")
 endif()
+find_program(EEL_AWK_EXECUTABLE NAMES awk gawk)
+if(NOT EEL_AWK_EXECUTABLE)
+  message(FATAL_ERROR "awk is required to validate EEL_END_TIME")
+endif()
+execute_process(
+  COMMAND "${EEL_AWK_EXECUTABLE}" -v "value=${EEL_END_TIME}"
+    "BEGIN {
+       numeric = value + 0
+       rendered = sprintf(\"%.17g\", numeric)
+       if (!(numeric > 0) || tolower(rendered) ~ /(inf|nan)/) exit 1
+     }"
+  RESULT_VARIABLE EEL_END_TIME_NUMERIC_STATUS
+  OUTPUT_QUIET ERROR_QUIET)
+if(NOT EEL_END_TIME_NUMERIC_STATUS EQUAL 0)
+  message(FATAL_ERROR
+    "EEL_END_TIME must be positive and representable by the runtime numeric parser")
+endif()
 
 include("${FIDELITY_FILE}")
 

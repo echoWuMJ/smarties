@@ -651,6 +651,7 @@ else
     --workerProcessesPerEnv 1
     --learnersOnWorkers 0
     --nTrainSteps 0
+    --nTrainUpdates 0
     --nEvalEpisodes 1
     --randSeed 11
     --learnerAuditDir "$restart_audit_dir"
