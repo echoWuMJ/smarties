@@ -92,6 +92,16 @@ set -e
 [[ $cross_status -ne 0 && $cross_output == *"verdict=NO_SYNTHETIC_CONVERGENCE"* ]] ||
   fail "four-thread regression was not rejected: $cross_output"
 
+scaled_one=$(run_case scaled_return_good 1 PASS 0)
+scaled_two=$(run_case scaled_return_good 2 PASS 0)
+set +e
+scaled_output=$(cmake -DONE_RUN_DIR="$scaled_one" -DFOUR_RUN_DIR="$scaled_two" \
+  -DEXPECTED_SEED=11 -DEXPECTED_UPDATES=8 -P "$comparator" 2>&1)
+scaled_status=$?
+set -e
+[[ $scaled_status -eq 0 && $scaled_output == *"verdict=PASS"* ]] ||
+  fail "per-decision-equivalent cross-thread results were rejected: $scaled_output"
+
 export SMARTIES_CPU_CHILD_TIMEOUT=1
 timeout_run=$(run_case timeout 1 OPERATIONAL_INCOMPLETE 1)
 [[ -f $timeout_run/training/processes-after.txt &&

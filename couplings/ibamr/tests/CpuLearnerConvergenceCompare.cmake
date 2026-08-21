@@ -161,6 +161,8 @@ function(validate_run run_dir prefix)
 
   set(${prefix}_FINAL_MSE "${final_action_mse}" PARENT_SCOPE)
   set(${prefix}_FINAL_RETURN "${final_mean_return}" PARENT_SCOPE)
+  set(${prefix}_FINAL_EPISODES "${final_episodes}" PARENT_SCOPE)
+  set(${prefix}_FINAL_DECISIONS "${final_decisions}" PARENT_SCOPE)
 endfunction()
 
 if(NOT DEFINED ONE_RUN_DIR OR NOT IS_DIRECTORY "${ONE_RUN_DIR}")
@@ -180,7 +182,7 @@ if(DEFINED FOUR_RUN_DIR AND NOT FOUR_RUN_DIR STREQUAL "")
   endif()
   validate_run("${FOUR_RUN_DIR}" four)
   math_true("${four_FINAL_MSE} <= ${one_FINAL_MSE} + 0.02" cross_mse)
-  math_true("(${four_FINAL_RETURN} - ${one_FINAL_RETURN} <= 0.02) && (${one_FINAL_RETURN} - ${four_FINAL_RETURN} <= 0.02)" cross_return)
+  math_true("((${four_FINAL_RETURN} * ${four_FINAL_EPISODES} / ${four_FINAL_DECISIONS}) - (${one_FINAL_RETURN} * ${one_FINAL_EPISODES} / ${one_FINAL_DECISIONS}) <= 0.02) && ((${one_FINAL_RETURN} * ${one_FINAL_EPISODES} / ${one_FINAL_DECISIONS}) - (${four_FINAL_RETURN} * ${four_FINAL_EPISODES} / ${four_FINAL_DECISIONS}) <= 0.02)" cross_return)
   if(NOT cross_mse OR NOT cross_return)
     report_failure(NO_SYNTHETIC_CONVERGENCE
       "four-thread final metrics differ from one-thread beyond the frozen tolerance")

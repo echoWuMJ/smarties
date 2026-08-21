@@ -46,6 +46,10 @@ else
     digest=1111111111111111
     mse=1.0
     mean_return=-1.0
+    [[ $scenario == scaled_return_good ]] && {
+      mse=0.10
+      mean_return=-3.20
+    }
   else
     digest=2222222222222222
     mse=0.40
@@ -53,6 +57,14 @@ else
     [[ $scenario == unchanged ]] && { mse=0.60; mean_return=-0.60; }
     [[ $scenario == four_bad && $threads == 4 ]] && { mse=0.45; mean_return=-0.45; }
     [[ $scenario == four_bad && $threads == 1 ]] && { mse=0.10; mean_return=-0.10; }
+    [[ $scenario == scaled_return_good && $threads == 1 ]] && {
+      mse=0.05
+      mean_return=-1.60
+    }
+    [[ $scenario == scaled_return_good && $threads == 2 ]] && {
+      mse=0.04
+      mean_return=-1.28
+    }
     [[ $scenario == checkpoint_mismatch ]] && digest=3333333333333333
   fi
   printf 'SMARTIES_NETWORK_AUDIT stage=restart network=agent_00_network0 step=0 threads=%s precision_bytes=4 params=544 digest=%s sum=0 sum_squares=0 max_abs=1 finite=1\n' "$threads" "$digest" >"$audit_dir/learner_audit.log"
