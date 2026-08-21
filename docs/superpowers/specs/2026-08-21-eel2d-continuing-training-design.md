@@ -80,7 +80,11 @@ finalize MPI last.
 
 - A configured logical horizon is a truncation and uses `sendLastState()`.
 - Reaching the IBAMR input end time is also a time-limit truncation and uses
-  `sendLastState()`.
+  `sendLastState()`. If Smarties has not already ended training, the adapter
+  then reports a configuration failure through the coordinated environment
+  failure path. It must not return normally and let Smarties invoke the
+  callback again, because that would silently construct a second IBAMR
+  simulation.
 - A future explicitly defined absorbing physical success or failure may use
   `sendTermState()`. This phase adds no such condition.
 - A non-finite state/reward or an unusable distributed solver remains an
@@ -99,6 +103,13 @@ and simulated physical time remains unchanged until an action arrives.
 
 The existing task field `episode_decisions` controls logical segment length.
 No reset flag or second episode mode is added.
+
+The node3 launcher accepts an explicit positive finite simulation end time,
+defaults it to the existing value `10.0`, passes it to the input renderer, and
+records it in the run manifest. A continuation run is configured so the
+Smarties training budget ends before this physical-time ceiling. The launcher
+does not guess an end time from an optimizer-update count because asynchronous
+learning provides no exact update-to-CFD-time conversion.
 
 The node3 launcher must stop enforcing the old
 `episode_decisions - minTotObsNum` single-episode ceiling. Long learner
@@ -136,8 +147,9 @@ Implementation follows test-driven development and increasing scope:
 3. Verify a Smarties termination signal stops further CFD advancement and
    returns through `CouplingDriver` with MPI still active until driver
    destruction.
-4. Verify the existing fatal-after-initialize path still coordinates through
-   `MPI_Abort` and leaves no scoped residual process.
+4. Verify both the existing fatal-after-initialize path and the new premature
+   IBAMR-end path coordinate through `MPI_Abort`, do not start a second
+   callback, and leave no scoped residual process.
 5. Package the clean revision and run a focused medium-fidelity node3 case with
    one learner rank and one environment communicator. It must cross at least
    two logical segment boundaries, observe native finite CPU learner updates,
