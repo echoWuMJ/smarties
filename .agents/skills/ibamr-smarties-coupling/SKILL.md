@@ -1,6 +1,6 @@
 ---
 name: ibamr-smarties-coupling
-description: Use when designing, implementing, reviewing, debugging, or documenting an IBAMR-Smarties coupling, especially MPI ownership, communicator partitioning, episode lifecycle, shutdown, or admission of lessons into experience.
+description: Use when designing, implementing, reviewing, debugging, or documenting an IBAMR-Smarties coupling, especially MPI ownership, communicator partitioning, long-lived training segments, shutdown, or admission of lessons into experience.
 ---
 
 # IBAMR-Smarties Coupling
@@ -12,12 +12,14 @@ Keep every coupling case on one long-lived, driver-owned MPI architecture and pr
 ## Required workflow
 
 1. Read [references/architecture-contract.md](references/architecture-contract.md) before proposing or changing coupling code.
-2. State the MPI owner, rank partition, communicator passed to each library, and shutdown path in the plan. Reject any design that conflicts with the contract.
-3. Keep case-specific state, action, reward, terminal conditions, and reset logic behind the adapter boundary. Do not change the ownership model to suit one case.
-4. Keep neural-network execution on the current Smarties CPU path. PyTorch and GPU enablement are out of scope until the user explicitly starts that phase.
-5. Verify in increasing scope: build/link, communicator topology, short episode, controlled reset, clean normal shutdown, injected failure, and repeated target-case runs.
-6. For every coupling problem, use the closure gate below. Do not describe a suspected cause as solved.
-7. Only after the gate passes, create one atomic record in `experience/verified/` using [references/experience-admission.md](references/experience-admission.md) and update `experience/README.md`.
+2. For the official eel2d continuing-training path, also read
+   [references/eel2d-continuing-coupling.md](references/eel2d-continuing-coupling.md).
+3. State the MPI owner, rank partition, communicator passed to each library, and shutdown path in the plan. Reject any design that conflicts with the contract.
+4. Keep case-specific state, action, reward, terminal conditions, and reset logic behind the adapter boundary. Do not change the ownership model to suit one case.
+5. Keep neural-network execution on the current Smarties CPU path. PyTorch and GPU enablement are out of scope until the user explicitly starts that phase.
+6. Verify in increasing scope: build/link, communicator topology, one safe control interval, logical-boundary continuity where applicable, clean normal shutdown, relevant failure behavior, and repeated target-case runs when claiming repeatability.
+7. For every coupling problem, use the closure gate below. Do not describe a suspected cause as solved.
+8. Only after the gate passes, create one atomic record in `experience/verified/` using [references/experience-admission.md](references/experience-admission.md) and update `experience/README.md`.
 
 ## Fixed decisions
 
@@ -26,6 +28,7 @@ Keep every coupling case on one long-lived, driver-owned MPI architecture and pr
 - Never `fork()` after MPI initialization. Allocate dedicated MPI ranks to learners and environment workers.
 - Only environment ranks initialize PETSc, SAMRAI, IBTK, and IBAMR. Set `PETSC_COMM_WORLD` to the environment communicator before PETSc/IBTK initialization.
 - IBAMR owns the CFD time-stepping loop inside the environment worker. The adapter exchanges state, action, reward, terminal status, and reset commands only at explicit safe points.
+- A logical Smarties training segment is not automatically an IBAMR reset. In a continuing case, preserve the existing environment, hierarchy, flow, geometry, time, and case-control state across `sendLastState()` / next `sendInitState()`; only perform a physical reset when that case explicitly defines one.
 - Normal destruction is inside-out; the driver finalizes MPI last. Distributed fatal errors coordinate and call `MPI_Abort`, never independent rank finalization.
 
 If current Smarties code cannot honor borrowed-MPI semantics, treat that as an implementation gap. Do not silently fall back to dual ownership.
