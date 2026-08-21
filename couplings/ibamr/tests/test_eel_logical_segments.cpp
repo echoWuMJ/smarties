@@ -23,10 +23,27 @@ int main()
       segments.segmentActive() || segments.completedSegments() != 1) return 4;
 
   if (segments.beginSegment() != 2) return 5;
+  const auto second_continuing = segments.completeDecision(true);
+  if (second_continuing.segment != 2 ||
+      second_continuing.segment_decision != 1 ||
+      second_continuing.total_decisions != 3 ||
+      second_continuing.kind != EelTransitionKind::continuing) return 6;
   const auto second = segments.completeDecision(false);
-  if (second.segment != 2 || second.segment_decision != 1 ||
-      second.total_decisions != 3 ||
+  if (second.segment != 2 || second.segment_decision != 2 ||
+      second.total_decisions != 4 ||
       second.kind != EelTransitionKind::ibamr_end_time ||
-      segments.completedSegments() != 2) return 6;
+      segments.segmentActive() || segments.completedSegments() != 2) return 7;
+
+  bool rejected_inactive_completion = false;
+  try { segments.completeDecision(true); }
+  catch (const std::logic_error&) { rejected_inactive_completion = true; }
+  if (!rejected_inactive_completion) return 8;
+
+  EelLogicalSegments active(2);
+  active.beginSegment();
+  bool rejected_duplicate_begin = false;
+  try { active.beginSegment(); }
+  catch (const std::logic_error&) { rejected_duplicate_begin = true; }
+  if (!rejected_duplicate_begin) return 9;
   return 0;
 }
