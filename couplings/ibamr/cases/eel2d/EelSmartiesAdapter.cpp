@@ -125,6 +125,14 @@ bool finiteTransition(const std::array<double, 5>& state,
          std::isfinite(reward.smoothness) && std::isfinite(reward.total);
 }
 
+bool finiteState(const std::array<double, 5>& state)
+{
+  for (const double value : state) {
+    if (!std::isfinite(value)) return false;
+  }
+  return true;
+}
+
 void awaitTrainingTermination(smarties::Communicator* const comm,
                               const std::vector<double>& state,
                               MPI_Comm environment_comm,
@@ -275,7 +283,7 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
                              int argc,
                              char** argv)
 {
-  control_protocol_report = { 0, 0, 0, 0, 0, 0, false, true, 5, 1 };
+  control_protocol_report = { 0, 0, 0, 0, 0, 0, false, false, 5, 1 };
   if (comm == nullptr || environment_comm == MPI_COMM_NULL) {
     MPI_Abort(MPI_COMM_WORLD, 96);
   }
@@ -292,6 +300,12 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
     EelEnvironment environment;
     environment.initialize(environment_comm, options.input_file);
     control_protocol_report.environment_initializations = 1;
+    int environment_rank = 0;
+    MPI_Comm_rank(environment_comm, &environment_rank);
+    if (environment_rank == 0) {
+      std::printf("EEL_CONTROL_ENVIRONMENT_INITIALIZED count=1\n");
+      std::fflush(stdout);
+    }
     const std::size_t lagrangian_points =
       environment.globalLagrangianPointCount();
     if (options.fault_after_initialize) {
@@ -316,6 +330,8 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
 
     std::array<double, 5> state =
       task.makeState(forward_velocity, environment.currentTailBeatPhase());
+    if (!finiteState(state))
+      throw std::runtime_error("non-finite initial eel state");
     EelLogicalSegments segments(config.episode_decisions);
     while (environment.stepsRemaining() && !comm->terminateTraining()) {
       segments.beginSegment();
@@ -350,8 +366,6 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
         control_protocol_report.clipped_actions = task.clippedActionCount();
         control_protocol_report.finite_state_and_reward = true;
 
-        int environment_rank = 0;
-        MPI_Comm_rank(environment_comm, &environment_rank);
         if (environment_rank == 0) {
           std::printf(
             "EEL_CONTROL segment=%u segment_decision=%u decision=%u "
@@ -401,8 +415,6 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
       throw std::runtime_error(
         "eel speed-tracking ended before Smarties training termination");
 
-    int environment_rank = 0;
-    MPI_Comm_rank(environment_comm, &environment_rank);
     if (environment_rank == 0) {
       std::printf(
         "EEL_CONTROL_COMPLETE segments=%u decisions=%u ibamr_steps=%u "
