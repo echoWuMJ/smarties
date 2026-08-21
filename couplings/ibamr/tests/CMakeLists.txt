@@ -74,6 +74,11 @@ target_include_directories(eel_layout_invariant_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d)
 target_link_libraries(eel_layout_invariant_test PRIVATE ibamr_eel_control)
 
+add_executable(eel_logical_segments_test test_eel_logical_segments.cpp)
+target_include_directories(eel_logical_segments_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d)
+target_link_libraries(eel_logical_segments_test PRIVATE ibamr_eel_control)
+
 add_test(
   NAME borrowed_engine_shutdown
   COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
@@ -161,6 +166,8 @@ add_test(
 add_test(NAME eel_control_measurement COMMAND eel_control_measurement_test)
 
 add_test(NAME eel_layout_invariant COMMAND eel_layout_invariant_test)
+
+add_test(NAME eel_logical_segments COMMAND eel_logical_segments_test)
 
 add_test(
   NAME eel_consistency_compare

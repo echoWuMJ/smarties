@@ -10,7 +10,8 @@ add_library(ibamr_eel_control STATIC
   cases/eel2d/TailBeatPhase.cpp
   cases/eel2d/EelLayoutInvariant.cpp
   cases/eel2d/EelControlMeasurement.cpp
-  cases/eel2d/EelControlTask.cpp)
+  cases/eel2d/EelControlTask.cpp
+  cases/eel2d/EelLogicalSegments.cpp)
 target_include_directories(ibamr_eel_control PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/cases/eel2d)
 target_compile_features(ibamr_eel_control PUBLIC cxx_std_14)
