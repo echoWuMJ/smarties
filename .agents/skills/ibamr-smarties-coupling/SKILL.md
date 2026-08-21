@@ -13,7 +13,8 @@ Keep every coupling case on one long-lived, driver-owned MPI architecture and pr
 
 1. Read [references/architecture-contract.md](references/architecture-contract.md) before proposing or changing coupling code.
 2. For the official eel2d continuing-training path, also read
-   [references/eel2d-continuing-coupling.md](references/eel2d-continuing-coupling.md).
+   [references/eel2d-continuing-coupling.md](references/eel2d-continuing-coupling.md)
+   and [references/eel2d-ibamr-case-map.md](references/eel2d-ibamr-case-map.md).
 3. State the MPI owner, rank partition, communicator passed to each library, and shutdown path in the plan. Reject any design that conflicts with the contract.
 4. Keep case-specific state, action, reward, terminal conditions, and reset logic behind the adapter boundary. Do not change the ownership model to suit one case.
 5. Keep neural-network execution on the current Smarties CPU path. PyTorch and GPU enablement are out of scope until the user explicitly starts that phase.

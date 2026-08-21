@@ -1,5 +1,7 @@
 # Smarties-IBAMR eel2d coupling
 
+Chinese setup and launch instructions: [README.zh-CN.md](README.zh-CN.md).
+
 This directory contains the executable coupling framework for the IBAMR 0.18.0
 `eel2d` example and Smarties. The original `smoke` mode remains a lifecycle
 probe. The experimental stage-two `train` mode applies one bounded Smarties
