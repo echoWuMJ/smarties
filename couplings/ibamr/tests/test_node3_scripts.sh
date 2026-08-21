@@ -12,7 +12,20 @@ activity_settings="$repo_root/couplings/ibamr/configs/training/cpu_learner_eel_a
 activity_task="$repo_root/couplings/ibamr/tests/fixtures/speed_tracking_learner_activity.conf"
 activity_wrapper="$repo_root/couplings/ibamr/tests/test_eel_learner_activity.cmake"
 fixture_root=$(mktemp -d)
-trap 'rm -rf "$fixture_root"' EXIT
+
+cleanup_fixture()
+{
+  local pid_file pid
+  for pid_file in "$fixture_root/eel-residual.pid" \
+                  "$fixture_root/orted-residual.pid"; do
+    if [[ -f $pid_file ]]; then
+      pid=$(<"$pid_file")
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
+  rm -rf "$fixture_root"
+}
+trap cleanup_fixture EXIT
 
 mkdir -p "$fixture_root/bin"
 
@@ -77,9 +90,12 @@ chmod +x "$fixture_root/bin/gcc" "$fixture_root/bin/g++" \
   "$fixture_root/bin/mpicc" "$fixture_root/bin/mpicxx" \
   "$fixture_root/bin/cmake" "$fixture_root/bin/mpiexec"
 cp "$(command -v sleep)" "$fixture_root/bin/prterun"
-chmod +x "$fixture_root/bin/prterun"
+cp "$(command -v sleep)" "$fixture_root/bin/orted"
+chmod +x "$fixture_root/bin/prterun" "$fixture_root/bin/orted"
 export FAKE_EEL_PRTERUN="$fixture_root/bin/prterun"
+export FAKE_EEL_ORTED="$fixture_root/bin/orted"
 export FAKE_EEL_RESIDUAL_PID_FILE="$fixture_root/eel-residual.pid"
+export FAKE_EEL_ORTED_RESIDUAL_PID_FILE="$fixture_root/orted-residual.pid"
 export FAKE_CMAKE_RENDER_LOG="$fixture_root/render.log"
 : >"$FAKE_CMAKE_RENDER_LOG"
 
@@ -367,6 +383,10 @@ if [[ ${FAKE_EEL_RESIDUAL:-0} == 1 ]]; then
   "$FAKE_EEL_PRTERUN" 30 </dev/null >/dev/null 2>&1 &
   printf '%s\n' "$!" >"$FAKE_EEL_RESIDUAL_PID_FILE"
 fi
+if [[ ${FAKE_EEL_ORTED_RESIDUAL:-0} == 1 ]]; then
+  "$FAKE_EEL_ORTED" 120 </dev/null >/dev/null 2>&1 &
+  printf '%s\n' "$!" >"$FAKE_EEL_ORTED_RESIDUAL_PID_FILE"
+fi
 audit=none
 while (($#)); do
   case $1 in
@@ -586,6 +606,7 @@ eel_residual_run=$(printf '%s\n' "$eel_residual_output" | \
 if [[ -f $FAKE_EEL_RESIDUAL_PID_FILE ]]; then
   eel_residual_pid=$(<"$FAKE_EEL_RESIDUAL_PID_FILE")
   kill "$eel_residual_pid" 2>/dev/null || true
+  rm "$FAKE_EEL_RESIDUAL_PID_FILE"
 fi
 [[ $eel_residual_status -ne 0 &&
    $eel_residual_output == *"verdict=OPERATIONAL_INCOMPLETE"* ]] ||
@@ -593,6 +614,32 @@ fi
 [[ "$(<"$eel_residual_run/restart_exit_code.txt")" == NOT_RUN ]] ||
   fail "checkpoint reload ran after eel left a process"
 assert_not_contains "$eel_residual_output" "CHECKPOINT_RELOAD_COMMAND="
+
+set +e
+FAKE_EEL_ORTED_RESIDUAL=1 bash "$run_script" train \
+  --source "$fixture_source" --build "$fixture_build" \
+  --envs 1 --ranks-per-env 2 --learner-threads 4 --fidelity medium \
+  --training couplings/ibamr/configs/training/cpu_learner_eel_activity.json \
+  --task couplings/ibamr/configs/tasks/speed_tracking_learner_activity.conf \
+  --train-updates 2 >"$fixture_root/orted-residual.log" 2>&1
+orted_residual_status=$?
+set -e
+orted_residual_output=$(<"$fixture_root/orted-residual.log")
+orted_residual_run=$(printf '%s\n' "$orted_residual_output" | \
+  sed -n 's/^RUN_DIRECTORY=//p')
+orted_residual_pid=$(<"$FAKE_EEL_ORTED_RESIDUAL_PID_FILE")
+orted_residual_comm=$(ps -p "$orted_residual_pid" -o comm= | \
+  tr -d '[:space:]')
+[[ $orted_residual_comm == orted ]] ||
+  fail "orted residual fixture has unexpected comm '$orted_residual_comm'"
+kill "$orted_residual_pid" 2>/dev/null || true
+rm "$FAKE_EEL_ORTED_RESIDUAL_PID_FILE"
+[[ $orted_residual_status -ne 0 &&
+   $orted_residual_output == *"verdict=OPERATIONAL_INCOMPLETE"* ]] ||
+  fail "run-scoped orted residual was not operationally rejected: $orted_residual_output"
+[[ "$(<"$orted_residual_run/restart_exit_code.txt")" == NOT_RUN ]] ||
+  fail "checkpoint reload ran after eel left a scoped orted process"
+assert_not_contains "$orted_residual_output" "CHECKPOINT_RELOAD_COMMAND="
 
 rm "$fixture_build/lib/libsmarties.so"
 output=$(bash "$run_script" smoke --source "$fixture_source" \

@@ -604,7 +604,7 @@ process_snapshot()
   : >"$output"
   while read -r pid name; do
     case $name in
-      mpiexec|prterun|orterun|ibamr_eel2d_sm|ibamr_eel2d_smoke|\
+      mpiexec|prterun|orterun|orted|ibamr_eel2d_sm|ibamr_eel2d_smoke|\
       smarties_cpu_le|smarties_cpu_learner_environment)
         if [[ -r /proc/$pid/environ ]] &&
            tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null |
