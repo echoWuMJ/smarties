@@ -415,6 +415,8 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
       throw std::runtime_error(
         "eel speed-tracking ended before Smarties training termination");
 
+    environment.writeVisualizationSnapshot();
+
     if (environment_rank == 0) {
       std::printf(
         "EEL_CONTROL_COMPLETE segments=%u decisions=%u ibamr_steps=%u "

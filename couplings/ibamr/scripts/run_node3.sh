@@ -32,6 +32,7 @@ Train options additionally require:
   --train-steps N          Positive post-startup data-step budget (default: 1)
   --train-updates N        Positive native optimizer-update budget
   --end-time T             Positive finite simulation end time (default: 10.0)
+  --long-run-output        Keep only initial/final CFD fields and disable full sample logging
 
 Smoke validates process ownership and the communication lifecycle. Train runs
 the stage-two continuing frequency-control path with Smarties' native CPU
@@ -158,6 +159,7 @@ task=
 build_dir=
 dry_run=0
 fault_after_initialize=0
+long_run_output=0
 if [[ $mode == smoke ]]; then
   training=couplings/ibamr/configs/training/smoke.json
   eel_mode=smoke
@@ -210,6 +212,10 @@ while (($#)); do
       fault_after_initialize=1
       shift
       ;;
+    --long-run-output)
+      long_run_output=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -241,6 +247,9 @@ if [[ $mode == train ]]; then
       die "--train-steps must be a positive integer"
   fi
   [[ -n $task ]] || die "--task is required for train mode"
+fi
+if ((long_run_output)) && [[ $mode != train ]]; then
+  die "--long-run-output is only valid in train mode"
 fi
 if [[ ! $simulation_end_time =~ ^[+-]?(([0-9]+([.][0-9]*)?)|([.][0-9]+))([eE][+-]?[0-9]+)?$ ]] ||
    ! awk -v value="$simulation_end_time" 'BEGIN {
@@ -307,6 +316,21 @@ fi
 
 environment_ranks=$((envs * ranks_per_env))
 mpi_ranks=$((learner_ranks + environment_ranks))
+if ((long_run_output)); then
+  output_profile=long-run-sparse
+  log_all_samples=0
+  eel_output_interval=1000000000
+  eel_viz_dump_interval=1000000000
+  eel_restart_dump_interval=0
+  eel_timer_dump_interval=0
+else
+  output_profile=default
+  log_all_samples=1
+  eel_output_interval=1
+  eel_viz_dump_interval=40
+  eel_restart_dump_interval=150
+  eel_timer_dump_interval=100
+fi
 revision=$(revision_of "$source_dir")
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 run_id="eel2d-${timestamp}-${revision}-$$"
@@ -450,6 +474,7 @@ launch_args=(
   --learnersOnWorkers 0
   --nTrainSteps "$effective_train_steps"
   --nTrainUpdates "$effective_train_updates"
+  --logAllSamples "$log_all_samples"
   --restart none
   --setupFolder .
   --input-file input2d
@@ -500,6 +525,12 @@ printf 'TRAIN_STEPS=%s\n' "$effective_train_steps"
 printf 'TRAIN_UPDATES=%s\n' "$effective_train_updates"
 printf 'TRAIN_BUDGET_KIND=%s\n' "$train_budget_kind"
 printf 'SIMULATION_END_TIME=%s\n' "$simulation_end_time"
+printf 'OUTPUT_PROFILE=%s\n' "$output_profile"
+printf 'LOG_ALL_SAMPLES=%s\n' "$log_all_samples"
+printf 'EEL_OUTPUT_INTERVAL=%s\n' "$eel_output_interval"
+printf 'EEL_VIZ_DUMP_INTERVAL=%s\n' "$eel_viz_dump_interval"
+printf 'EEL_RESTART_DUMP_INTERVAL=%s\n' "$eel_restart_dump_interval"
+printf 'EEL_TIMER_DUMP_INTERVAL=%s\n' "$eel_timer_dump_interval"
 printf 'COMMAND='
 printf '%q ' "${command[@]}"
 printf '\n'
@@ -520,6 +551,10 @@ render_fidelity()
   [[ -f "$config" ]] || die "fidelity config not found: $config"
   cmake -D"FIDELITY_FILE=$config" \
     -D"EEL_END_TIME=$simulation_end_time" \
+    -D"EEL_OUTPUT_INTERVAL=$eel_output_interval" \
+    -D"EEL_VIZ_DUMP_INTERVAL=$eel_viz_dump_interval" \
+    -D"EEL_RESTART_DUMP_INTERVAL=$eel_restart_dump_interval" \
+    -D"EEL_TIMER_DUMP_INTERVAL=$eel_timer_dump_interval" \
     -D"OUTPUT_FILE=$output" -P "$render_script"
 }
 
@@ -583,6 +618,12 @@ manifest="$run_dir/manifest.txt"
   printf 'train_updates=%s\n' "$effective_train_updates"
   printf 'train_budget_kind=%s\n' "$train_budget_kind"
   printf 'simulation_end_time=%s\n' "$simulation_end_time"
+  printf 'output_profile=%s\n' "$output_profile"
+  printf 'log_all_samples=%s\n' "$log_all_samples"
+  printf 'eel_output_interval=%s\n' "$eel_output_interval"
+  printf 'eel_viz_dump_interval=%s\n' "$eel_viz_dump_interval"
+  printf 'eel_restart_dump_interval=%s\n' "$eel_restart_dump_interval"
+  printf 'eel_timer_dump_interval=%s\n' "$eel_timer_dump_interval"
   printf 'state_dimension=%s\n' "$state_dimension"
   printf 'action_dimension=%s\n' "$action_dimension"
   printf 'control_stage=%s\n' "$control_stage"

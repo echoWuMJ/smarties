@@ -44,6 +44,30 @@ endif()
 
 include("${FIDELITY_FILE}")
 
+if(NOT DEFINED EEL_OUTPUT_INTERVAL)
+  set(EEL_OUTPUT_INTERVAL 1)
+endif()
+if(NOT DEFINED EEL_VIZ_DUMP_INTERVAL)
+  set(EEL_VIZ_DUMP_INTERVAL 40)
+endif()
+if(NOT DEFINED EEL_RESTART_DUMP_INTERVAL)
+  set(EEL_RESTART_DUMP_INTERVAL 150)
+endif()
+if(NOT DEFINED EEL_TIMER_DUMP_INTERVAL)
+  set(EEL_TIMER_DUMP_INTERVAL 100)
+endif()
+
+foreach(VARIABLE EEL_OUTPUT_INTERVAL EEL_VIZ_DUMP_INTERVAL)
+  if(NOT "${${VARIABLE}}" MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR "${VARIABLE} must be a positive integer")
+  endif()
+endforeach()
+foreach(VARIABLE EEL_RESTART_DUMP_INTERVAL EEL_TIMER_DUMP_INTERVAL)
+  if(NOT "${${VARIABLE}}" MATCHES "^(0|[1-9][0-9]*)$")
+    message(FATAL_ERROR "${VARIABLE} must be a nonnegative integer")
+  endif()
+endforeach()
+
 foreach(VARIABLE EEL_N EEL_MAX_LEVELS EEL_REF_RATIO)
   if(NOT DEFINED ${VARIABLE} OR NOT "${${VARIABLE}}" MATCHES "^[1-9][0-9]*$")
     message(FATAL_ERROR "${VARIABLE} must be a positive integer")
@@ -71,4 +95,12 @@ if(NOT END_TIME_ASSIGNMENT_COUNT EQUAL 1)
 endif()
 string(REGEX REPLACE "(^|\n)END_TIME[ \t]*=[ \t]*[^\n]+"
        "\\1END_TIME = ${EEL_END_TIME}" CONTENT "${CONTENT}")
+string(REGEX REPLACE "(^|\n)[ \t]*output_interval[ \t]*=[ \t]*[^\n]+"
+       "\\1   output_interval = ${EEL_OUTPUT_INTERVAL}" CONTENT "${CONTENT}")
+string(REGEX REPLACE "(^|\n)[ \t]*viz_dump_interval[ \t]*=[ \t]*[^\n]+"
+       "\\1   viz_dump_interval = ${EEL_VIZ_DUMP_INTERVAL}" CONTENT "${CONTENT}")
+string(REGEX REPLACE "(^|\n)[ \t]*restart_dump_interval[ \t]*=[ \t]*[^\n]+"
+       "\\1   restart_dump_interval = ${EEL_RESTART_DUMP_INTERVAL}" CONTENT "${CONTENT}")
+string(REGEX REPLACE "(^|\n)[ \t]*timer_dump_interval[ \t]*=[ \t]*[^\n]+"
+       "\\1   timer_dump_interval = ${EEL_TIMER_DUMP_INTERVAL}" CONTENT "${CONTENT}")
 file(WRITE "${OUTPUT_FILE}" "${CONTENT}")

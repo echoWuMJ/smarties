@@ -10,6 +10,8 @@ run_script="$repo_root/couplings/ibamr/scripts/run_node3.sh"
 speed_settings="$repo_root/couplings/ibamr/configs/training/speed_tracking.json"
 activity_settings="$repo_root/couplings/ibamr/configs/training/cpu_learner_eel_activity.json"
 activity_task="$repo_root/couplings/ibamr/tests/fixtures/speed_tracking_learner_activity.conf"
+longrun_settings="$repo_root/couplings/ibamr/configs/training/eel2d_longrun.json"
+longrun_task="$repo_root/couplings/ibamr/configs/tasks/eel2d_longrun.conf"
 activity_wrapper="$repo_root/couplings/ibamr/tests/test_eel_learner_activity.cmake"
 fixture_root=$(mktemp -d)
 
@@ -163,6 +165,31 @@ if grep -Eiq 'pytorch|torch|cuda|pybind' "$activity_settings"; then
   fail "eel learner activity settings enable a forbidden backend"
 fi
 
+[[ -f $longrun_settings && -f $longrun_task ]] ||
+  fail "missing long-run eel settings/task"
+longrun_batch=$(sed -n \
+  's/.*"batchSize"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+  "$longrun_settings")
+longrun_minimum=$(sed -n \
+  's/.*"minTotObsNum"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+  "$longrun_settings")
+longrun_capacity=$(sed -n \
+  's/.*"maxTotObsNum"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+  "$longrun_settings")
+longrun_save_frequency=$(sed -n \
+  's/.*"saveFreq"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+  "$longrun_settings")
+[[ $longrun_batch == 4 && $longrun_minimum == 8 &&
+   $longrun_capacity == 256 && $longrun_save_frequency == 8 ]] ||
+  fail "long-run learner settings must bound replay and checkpoint cadence"
+grep -Eq '^[[:space:]]*episode_decisions[[:space:]]*=[[:space:]]*2[[:space:]]*$' \
+  "$longrun_task" || fail "long-run task must use two-decision logical segments"
+grep -Eq '^[[:space:]]*warmup_cycles[[:space:]]*=[[:space:]]*0([.]0)?[[:space:]]*$' \
+  "$longrun_task" || fail "long-run task warmup must be zero"
+if grep -Eiq 'pytorch|torch|cuda|pybind' "$longrun_settings"; then
+  fail "long-run settings enable a forbidden backend"
+fi
+
 cat >"$fixture_root/activity-settings.json" <<'EOF'
 {"learner":"VRACER","batchSize":4,"minTotObsNum":1,"obsPerStep":1}
 EOF
@@ -243,6 +270,21 @@ output=$(bash "$run_script" train --dry-run --envs 1 --ranks-per-env 2 \
 assert_contains "$output" "--nTrainSteps 0"
 assert_contains "$output" "--nTrainUpdates 2"
 assert_contains "$output" "SIMULATION_END_TIME=12.5"
+
+output=$(bash "$run_script" train --dry-run --envs 1 --ranks-per-env 16 \
+  --learner-ranks 1 --learner-threads 2 --fidelity medium \
+  --training "$fixture_root/activity-settings.json" \
+  --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf \
+  --train-updates 32 --end-time 20 --long-run-output)
+assert_contains "$output" "ENVIRONMENT_RANKS=16"
+assert_contains "$output" "MPI_RANKS=17"
+assert_contains "$output" "OUTPUT_PROFILE=long-run-sparse"
+assert_contains "$output" "LOG_ALL_SAMPLES=0"
+assert_contains "$output" "EEL_OUTPUT_INTERVAL=1000000000"
+assert_contains "$output" "EEL_VIZ_DUMP_INTERVAL=1000000000"
+assert_contains "$output" "EEL_RESTART_DUMP_INTERVAL=0"
+assert_contains "$output" "EEL_TIMER_DUMP_INTERVAL=0"
+assert_contains "$output" "--logAllSamples 0"
 
 if capture_status "$fixture_root/train-budget-conflict.log" \
   bash "$run_script" train --dry-run --envs 1 --ranks-per-env 2 \

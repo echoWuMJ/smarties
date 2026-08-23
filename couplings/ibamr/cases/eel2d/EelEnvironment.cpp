@@ -67,6 +67,7 @@ public:
   double currentTailBeatPhase() const;
   double currentTailBeatFrequencyRatio() const;
   std::size_t globalLagrangianPointCount() const;
+  void writeVisualizationSnapshot();
   bool stepsRemaining() const;
   void shutdown();
 
@@ -376,6 +377,16 @@ EelEnvironment::Impl::globalLagrangianPointCount() const
 }
 
 void
+EelEnvironment::Impl::writeVisualizationSnapshot()
+{
+  if (!ready_) throw std::logic_error("EelEnvironment is not initialized");
+  if (!dump_viz_data_ || !uses_visit_) return;
+  time_integrator_->setupPlotData();
+  visit_data_writer_->writePlotData(patch_hierarchy_, iteration_num_, loop_time_);
+  silo_data_writer_->writePlotData(iteration_num_, loop_time_);
+}
+
+void
 EelEnvironment::Impl::setTailBeatFrequencyRatio(const double ratio)
 {
   if (!ready_ || ib_kinematics_op_.isNull())
@@ -607,6 +618,12 @@ std::size_t
 EelEnvironment::globalLagrangianPointCount() const
 {
   return impl_->globalLagrangianPointCount();
+}
+
+void
+EelEnvironment::writeVisualizationSnapshot()
+{
+  impl_->writeVisualizationSnapshot();
 }
 
 bool

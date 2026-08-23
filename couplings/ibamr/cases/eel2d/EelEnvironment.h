@@ -34,6 +34,7 @@ public:
   double currentTailBeatFrequencyRatio() const;
   std::size_t globalLagrangianPointCount() const;
   bool stepsRemaining() const;
+  void writeVisualizationSnapshot();
   void shutdown();
 
 private:

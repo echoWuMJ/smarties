@@ -170,6 +170,12 @@ add_test(NAME eel_layout_invariant COMMAND eel_layout_invariant_test)
 add_test(NAME eel_logical_segments COMMAND eel_logical_segments_test)
 
 add_test(
+  NAME eel_final_visualization_contract
+  COMMAND "${CMAKE_COMMAND}"
+    "-DCOUPLING_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/.."
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test_eel_final_visualization_contract.cmake")
+
+add_test(
   NAME eel_consistency_compare
   COMMAND "${CMAKE_COMMAND}"
     "-DCOMPARE_MODULE=${CMAKE_CURRENT_SOURCE_DIR}/EelConsistencyCompare.cmake"

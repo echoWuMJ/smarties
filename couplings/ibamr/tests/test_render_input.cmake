@@ -111,6 +111,38 @@ function(assert_end_time_preserved VALUE LABEL)
   endif()
 endfunction()
 
+function(assert_sparse_output_profile)
+  set(OUTPUT "${OUTPUT_DIR}/input2d-sparse")
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIDELITY_FILE=${COUPLING_ROOT}/configs/fidelity/medium.conf"
+      "-DEEL_END_TIME=20"
+      "-DEEL_OUTPUT_INTERVAL=1000000000"
+      "-DEEL_VIZ_DUMP_INTERVAL=1000000000"
+      "-DEEL_RESTART_DUMP_INTERVAL=0"
+      "-DEEL_TIMER_DUMP_INTERVAL=0"
+      "-DOUTPUT_FILE=${OUTPUT}"
+      -P "${RENDERER}"
+    RESULT_VARIABLE RESULT)
+  if(NOT RESULT EQUAL 0)
+    message(FATAL_ERROR "sparse-output rendering failed with exit code ${RESULT}")
+  endif()
+  file(READ "${OUTPUT}" CONTENT)
+  foreach(PAIR
+      "output_interval|1000000000"
+      "viz_dump_interval|1000000000"
+      "restart_dump_interval|0"
+      "timer_dump_interval|0")
+    string(REPLACE "|" ";" FIELDS "${PAIR}")
+    list(GET FIELDS 0 KEY)
+    list(GET FIELDS 1 VALUE)
+    string(REGEX MATCH "${KEY}[ \\t]*=[ \\t]*${VALUE}" MATCH "${CONTENT}")
+    if(MATCH STREQUAL "")
+      message(FATAL_ERROR "sparse output did not render ${KEY} = ${VALUE}")
+    endif()
+  endforeach()
+endfunction()
+
 assert_rendered_fidelity(coarse 32 2 4)
 assert_rendered_fidelity(medium 64 3 4)
 assert_rendered_fidelity(fine 128 3 4)
@@ -145,6 +177,7 @@ assert_end_time_rejected("1e9999" overflow)
 assert_end_time_rejected("1e-9999" underflow)
 assert_end_time_preserved("12.5" decimal)
 assert_end_time_preserved("1.25e1" scientific)
+assert_sparse_output_profile()
 
 file(SHA256 "${TEMPLATE}" HASH_AFTER)
 if(NOT HASH_BEFORE STREQUAL HASH_AFTER)

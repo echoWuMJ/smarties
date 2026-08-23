@@ -170,6 +170,25 @@ BUILD_JOBS=16 ./couplings/ibamr/scripts/build_node3.sh \
 环境 MPI rank 仍由 `--ranks-per-env` 指定。不要同时给出 `--train-steps` 和
 `--train-updates`。
 
+若要执行一次低存储的长程 V-RACER 流程，可使用项目提供的长程配置。以下拓扑中
+IBAMR 环境固定为 16 个 MPI ranks，另有 1 个 learner rank；`OMP_NUM_THREADS=1`，
+因此本次作业共使用 17 个 MPI ranks，未超过 32 个线程的资源边界：
+
+```bash
+./couplings/ibamr/scripts/run_node3.sh train \
+  --source /data2/mjwu/local/coupling-src/<snapshot> \
+  --build /data2/mjwu/local/coupling-build/<snapshot> \
+  --envs 1 --ranks-per-env 16 --learner-ranks 1 --learner-threads 1 \
+  --fidelity medium \
+  --training couplings/ibamr/configs/training/eel2d_longrun.json \
+  --task couplings/ibamr/configs/tasks/eel2d_longrun.conf \
+  --train-updates 32 --end-time 20 --long-run-output
+```
+
+该配置用于完整流程与存储策略验收，奖励目标和权重仍是诊断值，不构成已标定的物理
+最优策略。`--end-time` 是物理计算的安全上限；若先达到它，启动器会报告训练未正常
+完成，而不会把截断计算伪装为收敛结果。
+
 ### 启动参数
 
 | 参数 | 默认值 | 含义 |
@@ -188,6 +207,7 @@ BUILD_JOBS=16 ./couplings/ibamr/scripts/build_node3.sh \
 | `--train-steps N` | 1 | 启动数据之后的环境 transition 预算 |
 | `--train-updates N` | 0 | 精确的原生优化器更新预算；大于 0 时替代 steps 预算 |
 | `--end-time T` | 10.0 | IBAMR 正有限物理终止时间 |
+| `--long-run-output` | 关闭 | train 模式专用：关闭 Smarties 全样本记录，仅保留初始/终态 CFD 可视化快照及必要审计产物 |
 | `--fault-after-initialize` | 关闭 | 仅用于验证初始化后的协调失败路径 |
 | `--dry-run` | 关闭 | 预检并打印派生命令，不启动 MPI 作业 |
 
@@ -241,14 +261,14 @@ BUILD_JOBS=16 ./couplings/ibamr/scripts/build_node3.sh \
 - `Eel2dStr/`、`viz_eel2d_Str/`、`restart_IB2dStrDiv/` 和计时输出：由渲染后的
   IBAMR `input2d` 控制的结构、可视化、重启和性能数据。
 
-因此当前启动器会保存较多数据，并非“只保存最终 agent”。现有 medium 输入中，
-结构输出间隔为 1、可视化间隔为 40、IBAMR restart 间隔为 150、层级数据间隔为
-0、timer 间隔为 100；Smarties 默认还记录所有样本。短验证可直接使用，正式长
-训练前应先按研究目的降低 `input2d.in` 中输出频率，并为 Smarties 暴露或固定
-所需的 `--logAllSamples` 策略。当前 `run_node3.sh` 尚未提供该开关，不能在命令
-行假定它已经关闭。至少应保留：`manifest.txt`、冻结输入、联合日志、退出码、
-最终 learner checkpoint，以及复现实验所需的汇总指标；原始 observation、频繁
-可视化和高频 restart 是否保留由实验目的决定。
+默认输出配置适合短验证：结构输出间隔为 1、可视化间隔为 40、IBAMR restart
+间隔为 150、timer 间隔为 100，且 Smarties 使用 `logAllSamples=1`。长程训练应
+显式加 `--long-run-output`：它将 `logAllSamples` 设为 0，将结构输出和周期性
+可视化间隔设为 `1000000000`，并关闭 restart/timer 输出。环境初始化保留初始
+VisIt/Silo 快照；Smarties 正常结束后，环境在 MPI 和 IBAMR 仍存活时写出终态快照。
+无论输出档位，都应保留 `manifest.txt`、冻结输入、联合日志、退出码、最终 learner
+checkpoint 和复现实验所需的汇总指标。原始 observation、频繁可视化和高频 restart
+只在确有诊断需求时启用。
 
 正常的训练诊断结束应出现 `EEL_CONTROL_COMPLETE ... stopped_by=smarties`。
 每条 `EEL_CONTROL` 还会记录 `lagrangian_points`；medium 既有验证实例为 2932。
