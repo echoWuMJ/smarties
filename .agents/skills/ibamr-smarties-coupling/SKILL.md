@@ -1,55 +1,42 @@
 ---
 name: ibamr-smarties-coupling
-description: Use when designing, implementing, reviewing, debugging, or documenting an IBAMR-Smarties coupling, especially MPI ownership, communicator partitioning, long-lived training segments, shutdown, or admission of lessons into experience.
+description: Use when designing, implementing, porting, installing, reviewing, debugging, or documenting any IBAMR-Smarties reinforcement-learning coupling, especially MPI ownership, subcommunicators, safe action points, solver lifecycle, shutdown, and verified-experience admission.
 ---
 
 # IBAMR-Smarties Coupling
 
-## Purpose
+## Reference routing
 
-Keep every coupling case on one long-lived, driver-owned MPI architecture and prevent unverified conclusions from becoming project knowledge. The architecture contract is a design decision; it is not itself a verified experience.
+- Read [references/architecture-contract.md](references/architecture-contract.md) for every coupling task.
+- Read [references/case-porting-playbook.md](references/case-porting-playbook.md) when adding or restructuring a case.
+- Read [references/validated-lessons.md](references/validated-lessons.md) before changing communicators, lifecycle, control cadence, output retention, or evidence handling.
+- Read [references/eel2d-reference.md](references/eel2d-reference.md) only when working on eel2d or using it as an implementation example.
+- Read [references/experience-admission.md](references/experience-admission.md) before writing under `experience/verified/`.
 
-## Required workflow
-
-1. Read [references/architecture-contract.md](references/architecture-contract.md) before proposing or changing coupling code.
-2. For the official eel2d continuing-training path, also read
-   [references/eel2d-continuing-coupling.md](references/eel2d-continuing-coupling.md)
-   and [references/eel2d-ibamr-case-map.md](references/eel2d-ibamr-case-map.md).
-3. State the MPI owner, rank partition, communicator passed to each library, and shutdown path in the plan. Reject any design that conflicts with the contract.
-4. Keep case-specific state, action, reward, terminal conditions, and reset logic behind the adapter boundary. Do not change the ownership model to suit one case.
-5. Keep neural-network execution on the current Smarties CPU path. PyTorch and GPU enablement are out of scope until the user explicitly starts that phase.
-6. Verify in increasing scope: build/link, communicator topology, one safe control interval, logical-boundary continuity where applicable, clean normal shutdown, relevant failure behavior, and repeated target-case runs when claiming repeatability.
-7. For every coupling problem, use the closure gate below. Do not describe a suspected cause as solved.
-8. Only after the gate passes, create one atomic record in `experience/verified/` using [references/experience-admission.md](references/experience-admission.md) and update `experience/README.md`.
-
-## Fixed decisions
+## Fixed invariants
 
 - The coupling driver is the sole owner of `MPI_Init_thread()` and `MPI_Finalize()`.
 - Smarties borrows a supplied communicator, duplicates what it needs, frees only its own communicators, and never finalizes MPI in borrowed mode.
 - Never `fork()` after MPI initialization. Allocate dedicated MPI ranks to learners and environment workers.
 - Only environment ranks initialize PETSc, SAMRAI, IBTK, and IBAMR. Set `PETSC_COMM_WORLD` to the environment communicator before PETSc/IBTK initialization.
 - IBAMR owns the CFD time-stepping loop inside the environment worker. The adapter exchanges state, action, reward, terminal status, and reset commands only at explicit safe points.
+- A blocking `recvAction()` is the synchronization point: the environment waits without advancing IBAMR, then applies exactly one accepted action before advancing one complete control interval.
 - A logical Smarties training segment is not automatically an IBAMR reset. In a continuing case, preserve the existing environment, hierarchy, flow, geometry, time, and case-control state across `sendLastState()` / next `sendInitState()`; only perform a physical reset when that case explicitly defines one.
 - Normal destruction is inside-out; the driver finalizes MPI last. Distributed fatal errors coordinate and call `MPI_Abort`, never independent rank finalization.
 
-If current Smarties code cannot honor borrowed-MPI semantics, treat that as an implementation gap. Do not silently fall back to dual ownership.
+## Generic case integration
 
-## Problem closure and experience promotion
+1. Preserve the official IBAMR example's numerical setup and time-stepping order before introducing control.
+2. Move case initialization, observation extraction, control application, interval advancement, reset, and shutdown into a long-lived environment object.
+3. Keep state/action/reward definitions, control cadence, terminal policy, and Smarties messages in a thin case adapter.
+4. Keep `main()` limited to MPI ownership, rank partitioning, borrowed Smarties startup, environment dispatch, ordered destruction, and finalization.
+5. Define explicitly whether an episode boundary is logical continuation, partial reset, or full physical reset; never infer reset semantics from `sendLastState()`.
+6. Define output retention before a long run so CFD visualization, per-step samples, checkpoints, and restart data do not grow without a stated purpose.
 
-Keep all hypotheses, partial logs, failed attempts, and pending fixes outside `experience/`, under `.artifacts/ibamr-smarties-investigations/<issue-id>/`.
+## Verification and experience
 
-A problem is **closed** only when all of these are true:
+Verify in increasing scope: build/link, communicator topology, one action interval, state/action/reward exchange, logical or physical boundary behavior, normal shutdown, and the relevant fatal or reset path. Add repeated or long runs only when the claim being made requires them.
 
-- the original symptom and affected scope are recorded;
-- the root cause is demonstrated, not merely plausible;
-- the fix is exercised on the target IBAMR-Smarties path;
-- normal shutdown and at least one relevant failure/reset path pass;
-- repeated runs rule out a one-off success;
-- exact revisions, environment, topology, commands, expected results, actual results, and artifact locations are recorded;
-- limitations and the boundary of the claim are explicit.
+Keep hypotheses, partial logs, failed attempts, and pending fixes under `.artifacts/ibamr-smarties-investigations/<issue-id>/`. Promote one atomic conclusion to `experience/verified/` only after the admission rules pass with exact revisions, environment, topology, commands, results, artifacts, and claim limits. Do not use successful compilation or an unrelated Smarties example as coupling evidence.
 
-If any item is missing, report the result as open or partially verified and leave it outside `experience/`. Time pressure, scarce compute, success in CartPole, or success under a different MPI stack never lowers the gate.
-
-## Experience integrity
-
-An experience record must contain only claims directly covered by its evidence. Split mixed records so a verified fact is never bundled with an unverified recommendation. `experience/verified/` is the only authoritative record area. Never copy research notes, proposed architecture, or candidate fixes into it. Mechanical completeness checks do not prove correctness; inspect the referenced logs and rerun the stated verification before admission.
+Use Smarties' current CPU neural-network path. PyTorch, CUDA, pybind11, and Python bindings remain outside this coupling baseline until a separate migration phase is requested.

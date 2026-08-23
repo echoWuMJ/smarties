@@ -1,10 +1,13 @@
-# Smarties-IBAMR eel2d 耦合使用说明
+# Smarties-IBAMR 耦合安装与使用说明
 
-本文对应仓库分支 `feature/ibamr-eel2d-coupling`，目标机器为 node3 上已部署的
-IBAMR 0.18.0 环境。当前实现使用 Smarties 原生 CPU learner；不启用 Python
-binding、PyTorch 或 CUDA。它已支持单个持续 eel2d 物理时间线上的频率控制与
-Smarties 训练通信，但不把这里的诊断任务当作已校准的游动策略或独立 episode
-重置方案。
+本文从未编译源码开始，说明如何在 node3 上准备依赖、构建、启动和检查
+Smarties-IBAMR 耦合。现成案例是基于 IBAMR 0.18.0 官方 eel2d 的持续物理时间线
+频率控制；同一套 MPI 所有权和案例分层用于后续迁移到其他 IBAMR 案例。
+
+当前基线使用 Smarties 原生 C++ CPU learner，不启用 Python binding、PyTorch 或
+CUDA。`uv` 和 Python 3.12 可以作为服务器上的独立 Python 工具环境保留，但不
+参与本耦合可执行文件的编译和运行。当前结论是“两个软件能够按既定协议共同
+推进并更新原生网络”，不包含策略质量、奖励标定、收敛性或独立物理重置保证。
 
 ## 1. 获取指定版本
 
@@ -38,6 +41,21 @@ sha256sum -c SOURCE_MANIFEST.sha256
 ```
 
 `<snapshot>` 可自行命名；构建目录必须与该不可变源码目录一一对应。
+
+### 组件清单
+
+| 组件 | 当前要求 | 用途 |
+|---|---|---|
+| GCC/G++ | 8.5.0 | 编译 Smarties、IBAMR 耦合和 overlay |
+| Open MPI | 环境脚本提供，wrapper 必须指向 GCC/G++ 8.5.0 | 单作业内划分 learner 与 environment ranks |
+| CMake | 能配置当前仓库及 IBAMR CMake package | 生成并构建 Release 目标 |
+| IBAMR | 0.18.0 | 当前已验证 CFD 版本 |
+| IBSAMRAI2 源码 | `IBSAMRAI2-2025.10.29` | 生成子通信器 overlay |
+| PETSc | 3.23.3 | IBAMR 依赖；绑定到 environment communicator |
+| Shell 工具 | Bash、patch、make、awk、sed、sha256sum | 构建、输入渲染、身份记录和启动 |
+| uv/Python 3.12 | 可选，不进入当前二进制路径 | 供其它 Python 工具或后续独立工作使用 |
+
+源码包、autoibamr 基础安装和上述工具齐全后，构建和运行不需要访问外网。
 
 ## 2. node3 前提环境
 
@@ -76,7 +94,7 @@ g++ -dumpfullversion -dumpversion   # 必须为 8.5.0
 
 Smarties 会把一个 MPI 作业分为 learner ranks 与一个或多个 IBAMR environment
 communicator。IBAMR 必须只在自己的环境子通信器内集体通信；否则 learner rank
-不会参加 IBAMR 的集体/点对点通信，程序就可能卡死。
+不会参加 IBAMR 的集体/点对点通信，这会使通信缺少参与 rank 并产生卡死风险。
 
 node3 所用 IBSAMRAI2 的若干网格聚类与通信路径把 `MPI_COMM_WORLD` 写死。补丁将
 这些位置改为 `SAMRAI_MPI::getCommunicator()` 或对象当前的 communicator，例如
@@ -103,6 +121,18 @@ active communicator。这三层共同保证 PETSc、SAMRAI、IBTK 和 IBAMR 看�
 该脚本会准备 overlay，使用 GCC 8.5.0/CMake 编译 `ibamr_eel2d_smoke` 和
 `libsmarties.so`，并写入 `build_manifest.txt`。`COMPILE_PY_SO=OFF` 是有意的：
 当前耦合执行路径不需要 Python C++ binding。
+
+默认并行编译任务数为 8，可在命令前设置 `BUILD_JOBS` 调整：
+
+```bash
+BUILD_JOBS=16 ./couplings/ibamr/scripts/build_node3.sh \
+  --source /data2/mjwu/local/coupling-src/<snapshot> \
+  --build /data2/mjwu/local/coupling-build/<snapshot>
+```
+
+`--ibamr-overlay DIR` 可指定另一份隔离 overlay；省略时使用
+`/data2/mjwu/local/coupling-deps/ibamr-0.18.0-samrai-subcomm-v1`。先运行
+`--dry-run` 可完成环境预检并打印将执行的配置和构建命令，不写构建产物。
 
 这里没有对 Smarties 源码树执行全局 `make install`：编译产物固定放在
 `--build` 指定目录中，其中实际启动程序为
@@ -140,11 +170,85 @@ active communicator。这三层共同保证 PETSc、SAMRAI、IBTK 和 IBAMR 看�
 环境 MPI rank 仍由 `--ranks-per-env` 指定。不要同时给出 `--train-steps` 和
 `--train-updates`。
 
+### 启动参数
+
+| 参数 | 默认值 | 含义 |
+|---|---:|---|
+| `smoke` / `train` | 必填 | 生命周期检查或真实 eel2d 频率控制 |
+| `--source DIR` | 当前仓库 | 源码快照；运行目录也创建在该目录下 |
+| `--build DIR` | 按源码目录名派生 | 与源码 revision 匹配的构建目录 |
+| `--envs N` | 1 | 同时运行的 IBAMR 环境数 |
+| `--ranks-per-env N` | 1 | 每个 IBAMR 环境使用的 MPI ranks |
+| `--learner-ranks N` | 1 | Smarties master/learner ranks |
+| `--learner-threads N` | 1 | 每个 learner rank 的原生 CPU/OpenMP 线程数 |
+| `--fidelity LEVEL` | `medium` | 当前只接受 `medium` |
+| `--training FILE` | 随模式选择 | Smarties JSON 网络与学习参数 |
+| `--smoke-steps N` | 1 | smoke 模式推进的 IBAMR 步数 |
+| `--task FILE` | train 必填 | eel2d 状态、动作、奖励与控制周期配置 |
+| `--train-steps N` | 1 | 启动数据之后的环境 transition 预算 |
+| `--train-updates N` | 0 | 精确的原生优化器更新预算；大于 0 时替代 steps 预算 |
+| `--end-time T` | 10.0 | IBAMR 正有限物理终止时间 |
+| `--fault-after-initialize` | 关闭 | 仅用于验证初始化后的协调失败路径 |
+| `--dry-run` | 关闭 | 预检并打印派生命令，不启动 MPI 作业 |
+
+只要 `--learner-threads` 大于 1，当前脚本就使用
+`mpiexec --bind-to core --map-by slot:PE=4`，即每个 MPI rank 预留 4 个处理单元；
+这不是“每个 IBAMR rank 必须占满 4 核”。提交批处理任务时应按脚本实际绑定
+预留 CPU，修改线程/绑定策略前先做拓扑检查。
+
+### 任务配置参数
+
+`couplings/ibamr/configs/tasks/speed_tracking.example.conf` 是完整模板。参数分为：
+
+| 参数 | 含义 |
+|---|---|
+| `baseline_angular_frequency` | 官方基准尾拍角频率；当前 eel2d 为 6.28 |
+| `minimum_frequency_ratio` / `maximum_frequency_ratio` | 动作 `[-1,1]` 映射后的频率比范围 |
+| `maximum_ratio_delta` | 每个决策最多改变的频率比，限制突变 |
+| `decisions_per_baseline_period` | 一个基准周期内的控制决策数 |
+| `target_forward_speed` | 目标推进速度 |
+| `forward_direction_x/y` | 由质心位移计算推进速度的投影方向 |
+| `velocity_scale` | 状态和跟踪误差的速度归一化尺度 |
+| `tracking_weight` | 速度跟踪平方误差权重 |
+| `frequency_weight` | 偏离基准频率比 1 的平方惩罚权重 |
+| `smoothness_weight` | 相邻频率比变化的平方惩罚权重 |
+| `warmup_cycles` | 第一次受控决策前按基准频率推进的周期数 |
+| `episode_decisions` | 一个 Smarties 逻辑段包含的决策数；不触发物理重置 |
+
+控制区间为
+`2*pi/(decisions_per_baseline_period*baseline_angular_frequency)`。模板和
+`tests/fixtures/` 下任务文件只用于示范、协议或 learner 更新验证；开始正式训练
+前必须在目标网格上标定推进方向、目标速度、归一化尺度和奖励权重。
+
+### Smarties JSON 参数
+
+`speed_tracking.json` 当前选择 `VRACER`，以 `nnLayerSizes` 设置全连接隐藏层，
+`batchSize` 设置一次更新使用的样本数，`minTotObsNum` 设置开始学习前的最少观测，
+`maxTotObsNum` 限制 replay memory 容量，`obsPerStep` 控制每个学习步采样的观测数，
+`saveFreq` 按优化器更新次数设置常规 checkpoint 间隔。修改 JSON 不需要重新
+编译；修改 C++ 状态/动作维度、运动库或 IBAMR 案例实现需要重新编译。
+
 运行器为每次启动在 `couplings/ibamr/runs/` 创建独立目录，其中包括：
 
 - `manifest.txt`：源码、可执行文件、库、overlay 补丁和启动拓扑的身份信息；
 - `input2d`、`eel2d.vertex`、`settings.json`、`task.conf`：本次冻结输入；
-- `stdout.log`、退出码和 learner 审计目录。
+- `stdout.log`、`exit_code.txt` 和 `processes-after.txt`：联合日志、退出码和作用域内
+  残留进程快照；
+- `learner-audit/initial`、`learner-audit/final` 及审计日志：显式 learner
+  初始化/最终网络、优化器、缩放和 replay 状态；
+- `agent_*_cumulative_rewards.dat`、`agent_*_obs.raw`：Smarties 默认
+  `logAllSamples=1` 时保存的完整 episode 回报和 transition 原始记录；
+- `Eel2dStr/`、`viz_eel2d_Str/`、`restart_IB2dStrDiv/` 和计时输出：由渲染后的
+  IBAMR `input2d` 控制的结构、可视化、重启和性能数据。
+
+因此当前启动器会保存较多数据，并非“只保存最终 agent”。现有 medium 输入中，
+结构输出间隔为 1、可视化间隔为 40、IBAMR restart 间隔为 150、层级数据间隔为
+0、timer 间隔为 100；Smarties 默认还记录所有样本。短验证可直接使用，正式长
+训练前应先按研究目的降低 `input2d.in` 中输出频率，并为 Smarties 暴露或固定
+所需的 `--logAllSamples` 策略。当前 `run_node3.sh` 尚未提供该开关，不能在命令
+行假定它已经关闭。至少应保留：`manifest.txt`、冻结输入、联合日志、退出码、
+最终 learner checkpoint，以及复现实验所需的汇总指标；原始 observation、频繁
+可视化和高频 restart 是否保留由实验目的决定。
 
 正常的训练诊断结束应出现 `EEL_CONTROL_COMPLETE ... stopped_by=smarties`。
 每条 `EEL_CONTROL` 还会记录 `lagrangian_points`；medium 既有验证实例为 2932。
@@ -154,6 +258,22 @@ active communicator。这三层共同保证 PETSc、SAMRAI、IBTK 和 IBAMR 看�
 `--dry-run` 可以先检查环境、输入与派生 MPI 启动命令而不实际运行；把它追加到
 上面任一完整的 `run_node3.sh` 命令末尾即可。
 
+### 结果与报错判读
+
+| 现象或信息 | 含义与处理边界 |
+|---|---|
+| `EEL_CONTROL_COMPLETE ... stopped_by=smarties` 且 `exit_code.txt` 为 0 | Smarties 先达到训练预算，环境完成正常逆序销毁 |
+| `IBAMR end time reached before Smarties training termination` | 物理 `END_TIME` 小于训练所需时间；已发送截断 transition 后走协调失败路径 |
+| `requires gcc/g++ 8.5.0`、`mpicc uses ...` | 未加载指定环境或 MPI wrapper 编译器不匹配 |
+| `patched IBAMR overlay is incomplete` | overlay 未完成安装或使用了错误 prefix，重新运行 prepare/build 脚本 |
+| `build identity does not match source revision` | 源码、可执行文件、动态库或 build manifest 不属于同一快照 |
+| `non-finite eel state or reward` | 物理量、归一化或任务参数无效；不得将该 transition 当作训练样本继续 |
+| `processes-after.txt` 非空 | 本次作用域仍有 MPI launcher、daemon 或案例进程，不能判为清理完成 |
+
+`lagrangian_points` 在同一模型和输入下应保持不变。当前 medium 已验证值为 2932；
+出现骤减时先检查 vertex 文件、输入复制和布局不变量，不得将模型点减少解释成
+正常的背景网格粗化。
+
 ## 6. IBAMR 侧改造位置
 
 官方 eel2d 基线及来源哈希在
@@ -162,8 +282,9 @@ active communicator。这三层共同保证 PETSc、SAMRAI、IBTK 和 IBAMR 看�
 时间推进封装为环境；`TailBeatPhase.*` 保证频率动作切换时相位连续；
 `upstream/IBEELKinematics.*` 将原时间项替换为 `PHI`/`OMEGA`；
 `EelSmartiesAdapter.*` 在控制安全点做状态、动作、奖励传递；`main.cpp` 仅将
-模式交给唯一的 MPI 所有者 `CouplingDriver`。详细约束见仓库 skill 的
-`references/eel2d-ibamr-case-map.md`。
+模式交给唯一的 MPI 所有者 `CouplingDriver`。通用迁移流程见仓库 skill 的
+`references/case-porting-playbook.md`，eel2d 公式和文件边界见
+`references/eel2d-reference.md`。
 
 ### 动作在何处插入，IBAMR 又在何处等待
 
@@ -190,6 +311,11 @@ const ControlIntervalResult interval =
 `TailBeatPhase` 先保存动作时刻的相位，再更新角频率；`IBEELKinematics` 将
 连续 `PHI` 和 `OMEGA` 注入原有的鱼形和变形速度解析器。
 
+动作是一个标量，经 `[-1,1]` 裁剪、线性映射到配置的频率比区间，再经过
+`maximum_ratio_delta` 限幅。状态为五维：归一化推进速度、归一化目标速度、当前
+频率比、连续相位的正弦和余弦。奖励等于速度跟踪平方惩罚、偏离基准频率平方
+惩罚和相邻动作平滑平方惩罚之和；频率项不是功耗或推进效率的物理测量。
+
 ## 7. 迁移到其他 IBAMR 版本
 
 本仓库的脚本、补丁和 eel2d 代码只针对 node3 的 **IBAMR 0.18.0 + bundled
@@ -207,3 +333,36 @@ IBSAMRAI2-2025.10.29 + PETSc 3.23.3 + GCC 8.5.0** 验证。它们不是其他 IB
 
 因此，通用的是 MPI 所有权和“安全控制点”架构；具体补丁和 IBAMR 案例封装必须
 按目标版本重新验证。
+
+## 8. 迁移到其他 IBAMR 案例
+
+迁移应从目标 IBAMR 版本的官方案例复制数值设置和推进顺序，先保持无控制基线
+可运行，再按以下边界拆分：
+
+1. `CaseEnvironment` 只负责案例初始化、观测所需物理量提取、动作落点、完整控制
+   区间推进、明确定义的 reset 和逆序销毁；
+2. `CaseSmartiesAdapter` 只负责状态/动作维度、归一化、奖励、控制节拍、终止语义
+   以及 `sendInitState`/`recvAction`/`sendState`/`sendLastState` 协议；
+3. `main.cpp` 只解析案例模式并调用 `CouplingDriver`，不得再次初始化或终结 MPI；
+4. learner ranks 不创建 PETSc/SAMRAI/IBTK/IBAMR 对象，environment ranks 在初始化
+   CFD 栈之前将 `PETSC_COMM_WORLD` 和 SAMRAI active communicator 绑定到各自环境；
+5. 明确逻辑连续、部分物理 reset 或完整物理 reset，不能把 Smarties 段结束自动
+   当作 IBAMR 已重建；
+6. `recvAction()` 返回前不推进 IBAMR，动作只在完整时间步之间的安全点生效。
+
+最低验证顺序是：构建和链接、rank/communicator 拓扑、一次动作区间、状态动作
+奖励交换、声明的段边界或 reset、正常退出，以及该案例相关的协调失败路径。
+只有这些检查通过，才能说新案例完成了耦合；策略质量和收敛性属于之后的任务
+设计与训练阶段。
+
+## 9. 当前已验证范围
+
+有界 node3 验证使用 GCC 8.5、Open MPI 5.0.9、IBAMR 0.18、CPU Smarties、1 个
+learner rank、1 个双 rank IBAMR 环境和 2 个 learner threads。medium 诊断运行
+完成 2 个逻辑段、4 次动作决策和 5004 个 IBAMR 步，2932 个全局拉格朗日点保持
+不变，发生 2 次有限的原生 CPU 网络更新，并完成最终 checkpoint 重载一致性
+检查；另一个短 `END_TIME` 运行进入协调失败路径且未观察到 callback 重入。
+
+以上范围证明当前拓扑下的耦合协议、持续推进和原生 learner 更新可以共同运行。
+它不证明长时间训练重复性、两个 16-rank 环境、策略优势、任务收敛、物理 reset、
+PyTorch/CUDA 或非 IBAMR 0.18 兼容性。
