@@ -49,6 +49,15 @@ target_link_libraries(mpi_session PRIVATE ibamr_coupling_core)
 add_executable(communicator_layout test_communicator_layout.cpp)
 target_link_libraries(communicator_layout PRIVATE ibamr_coupling_core)
 
+add_executable(distributed_environment_shutdown
+  test_distributed_environment_shutdown.cpp)
+target_include_directories(distributed_environment_shutdown PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../core)
+target_link_libraries(distributed_environment_shutdown PRIVATE
+  ibamr_coupling_core
+  libsmarties
+  MPI::MPI_CXX)
+
 add_executable(tail_beat_phase_test test_tail_beat_phase.cpp)
 target_include_directories(tail_beat_phase_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d)
@@ -220,6 +229,21 @@ add_test(
   COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
           ${MPIEXEC_PREFLAGS} $<TARGET_FILE:communicator_layout>
           ${MPIEXEC_POSTFLAGS})
+
+if(UNIX)
+  add_test(
+    NAME distributed_environment_shutdown
+    COMMAND "${CMAKE_COMMAND}"
+      "-DMPIEXEC_EXECUTABLE=${MPIEXEC_EXECUTABLE}"
+      "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+      "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
+      "-DMPIEXEC_POSTFLAGS=${MPIEXEC_POSTFLAGS}"
+      "-DTEST_EXECUTABLE=$<TARGET_FILE:distributed_environment_shutdown>"
+      "-DSETTINGS_FILE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/cpu_learner_smoke.json"
+      "-DRUN_ROOT=${CMAKE_CURRENT_BINARY_DIR}/distributed-environment-shutdown"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_distributed_environment_shutdown.cmake")
+  set_tests_properties(distributed_environment_shutdown PROPERTIES TIMEOUT 30)
+endif()
 
 if(BUILD_IBAMR_COUPLING)
   add_executable(eel_smoke_protocol test_eel_smoke_protocol.cpp)

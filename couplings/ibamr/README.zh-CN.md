@@ -306,6 +306,29 @@ checkpoint 和复现实验所需的汇总指标。原始 observation、频繁可
 `references/case-porting-playbook.md`，eel2d 公式和文件边界见
 `references/eel2d-reference.md`。
 
+### 多 MPI rank 环境必须声明分布式 agent
+
+一个 IBAMR 环境由多个 MPI rank 共同推进时，案例 adapter 必须在第一次
+`sendInitState()`、`sendState()` 或 `sendLastState()` 之前，由环境 communicator
+中的所有 rank 调用：
+
+```cpp
+comm->envHasDistributedAgents();
+comm->setStateActionDims(state_dimension, action_dimension);
+comm->setActionScales(action_upper, action_lower, true);
+```
+
+该声明表示这些 rank 共同实现同一个 agent，而不是多个相互独立的环境。状态只由
+环境根 rank 送给 learner；learner 返回的动作以及训练结束的 KILL 状态由环境根通过
+`environment_app_comm` 广播给同组其余 rank。
+
+eel2d 初次接入多 rank 环境时曾遗漏这次调用。遗漏后 Smarties 会让每个 IBAMR rank
+各自参与状态/动作交换，无法保证所有 rank 接受同一个动作；集体推进可能因此发生
+状态分歧或通信阻塞。补上调用只解决分布式 agent 的正常状态/动作语义；Smarties
+master 的结束路径还必须只等待每个分布式环境的根 worker，不能等待非根 rank 再向
+learner 发送状态。当前实现和 `distributed_environment_shutdown` 回归测试同时覆盖
+这两项要求。
+
 ### 动作在何处插入，IBAMR 又在何处等待
 
 真实控制循环位于 `cases/eel2d/EelSmartiesAdapter.cpp`。环境先通过
@@ -362,7 +385,8 @@ IBSAMRAI2-2025.10.29 + PETSc 3.23.3 + GCC 8.5.0** 验证。它们不是其他 IB
 1. `CaseEnvironment` 只负责案例初始化、观测所需物理量提取、动作落点、完整控制
    区间推进、明确定义的 reset 和逆序销毁；
 2. `CaseSmartiesAdapter` 只负责状态/动作维度、归一化、奖励、控制节拍、终止语义
-   以及 `sendInitState`/`recvAction`/`sendState`/`sendLastState` 协议；
+   以及 `sendInitState`/`recvAction`/`sendState`/`sendLastState` 协议；多 rank 环境
+   必须在首次协议交换前调用 `comm->envHasDistributedAgents()`；
 3. `main.cpp` 只解析案例模式并调用 `CouplingDriver`，不得再次初始化或终结 MPI；
 4. learner ranks 不创建 PETSc/SAMRAI/IBTK/IBAMR 对象，environment ranks 在初始化
    CFD 栈之前将 `PETSC_COMM_WORLD` 和 SAMRAI active communicator 绑定到各自环境；

@@ -208,6 +208,7 @@ void runSmokeEpisode(smarties::Communicator* const comm,
   const SmokeOptions options = parseSmokeOptions(argc, argv, environment_comm);
 
   try {
+    comm->envHasDistributedAgents();
     comm->setStateActionDims(1, 1);
     comm->setActionScales({ 1.0 }, { -1.0 }, true);
 
@@ -294,6 +295,7 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
   try {
     const EelTaskConfig config = loadEelTaskConfig(options.task_file);
     EelControlTask task(config);
+    comm->envHasDistributedAgents();
     comm->setStateActionDims(5, 1);
     comm->setActionScales({ 1.0 }, { -1.0 }, true);
 

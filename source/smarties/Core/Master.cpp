@@ -68,15 +68,23 @@ void Master<CommType, Request_t>::spawnCallsHandlers()
   // if workers host learning algos then no need to supply actions
   if(distrib.learnersOnWorkers && distrib.nForkedProcesses2spawn < 1) return;
 
+  const Uint ranksPerEnvironment =
+    std::max(distrib.workerProcessesPerEnv, static_cast<Uint>(1));
+  std::vector<Uint> stateCallers;
+  for(Uint worker=0; worker<nCallingEnvs; worker += ranksPerEnvironment)
+    stateCallers.push_back(worker);
+
   #pragma omp parallel num_threads(distrib.nThreads)
   {
     std::vector<Uint> shareWorkers;
     const Uint thrN = omp_get_num_threads();
     const Uint thrID = thrN-1 - omp_get_thread_num(); // thrN-1, thrN-2, ..., 0
-    const Uint workerShare = std::ceil(nCallingEnvs / (double) thrN);
+    const Uint workerShare = std::ceil(stateCallers.size() / (double) thrN);
     const Uint workerBeg = thrID * workerShare;
-    const Uint workerEnd = std::min(nCallingEnvs, (thrID+1)*workerShare);
-    for(Uint i=workerBeg; i<workerEnd; ++i) shareWorkers.push_back(i);
+    const Uint workerEnd = std::min(
+      static_cast<Uint>(stateCallers.size()), (thrID+1)*workerShare);
+    for(Uint i=workerBeg; i<workerEnd; ++i)
+      shareWorkers.push_back(stateCallers[i]);
     #pragma omp critical
     if (shareWorkers.size())
       worker_replies.push_back (
