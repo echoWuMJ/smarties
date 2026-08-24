@@ -9,6 +9,7 @@ Unverified hypotheses, research notes, partial logs, failed attempts, and candid
 | Record | Exact verified scope | Implementation revision |
 |---|---|---|
 | [eel2d stage-one lifecycle](verified/2026-08-08-eel2d-stage1-lifecycle.md) | IBAMR 0.18.0 eel2d lifecycle, specified MPI topologies, normal shutdown, and coordinated fatal failure on node03 | `1b8d437a54f5` |
+| [distributed-environment shutdown](verified/2026-08-24-distributed-environment-shutdown.md) | Smarties multi-rank environment declaration and clean master/IBAMR termination for the verified node03 topology | `a4d0d91ad653` |
 
 ## Legacy documents pending audit
 
