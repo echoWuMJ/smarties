@@ -189,25 +189,52 @@ IBAMR 环境固定为 16 个 MPI ranks，另有 1 个 learner rank；`OMP_NUM_TH
 最优策略。`--end-time` 是物理计算的安全上限；若先达到它，启动器会报告训练未正常
 完成，而不会把截断计算伪装为收敛结果。
 
+训练正常结束后，直接用同一个 IBAMR 耦合可执行文件加载最终 Agent。评估不是另一个
+模拟程序；它仍执行相同的 `EelEnvironment`、`EelSmartiesAdapter` 和真实 CFD 时间推进，
+只是 Smarties 冻结网络、使用策略均值生成动作，并且不写 replay、不执行优化器更新：
+
+```bash
+TRAIN_RUN=/data2/mjwu/local/coupling-src/<snapshot>/couplings/ibamr/runs/<train-run>
+
+./couplings/ibamr/scripts/run_node3.sh eval \
+  --source /data2/mjwu/local/coupling-src/<snapshot> \
+  --build /data2/mjwu/local/coupling-build/<snapshot> \
+  --envs 1 --ranks-per-env 16 --learner-ranks 1 --learner-threads 1 \
+  --fidelity medium \
+  --training "$TRAIN_RUN/settings.json" \
+  --task "$TRAIN_RUN/task.conf" \
+  --checkpoint "$TRAIN_RUN/learner-audit/final" \
+  --eval-episodes 1 --end-time 20 --long-run-output
+```
+
+`--eval-episodes` 统计 Smarties 逻辑段；当前 continuing eel2d 在逻辑段之间保持同一条
+物理轨迹，不重置网格、流场、鱼体、相位或物理时间。评估运行目录独立保存冻结输入、
+`manifest.txt`、新的 `learner-audit/learner_audit.log`、CFD 初始/终态输出、退出码和
+残留进程快照。审计日志应包含 `stage=restart`，不得包含 `stage=update`。正式评估当前
+固定 `--envs 1`：适配器达到精确 episode 数后只完成 Smarties 终止握手，不再让 IBAMR
+多推进一个控制区间。
+
 ### 启动参数
 
 | 参数 | 默认值 | 含义 |
 |---|---:|---|
-| `smoke` / `train` | 必填 | 生命周期检查或真实 eel2d 频率控制 |
+| `smoke` / `train` / `eval` | 必填 | 生命周期检查、训练或 checkpoint 策略评估 |
 | `--source DIR` | 当前仓库 | 源码快照；运行目录也创建在该目录下 |
 | `--build DIR` | 按源码目录名派生 | 与源码 revision 匹配的构建目录 |
-| `--envs N` | 1 | 同时运行的 IBAMR 环境数 |
+| `--envs N` | 1 | 同时运行的 IBAMR 环境数；eval 当前必须为 1，以保证精确 episode 边界 |
 | `--ranks-per-env N` | 1 | 每个 IBAMR 环境使用的 MPI ranks |
 | `--learner-ranks N` | 1 | Smarties master/learner ranks |
 | `--learner-threads N` | 1 | 每个 learner rank 的原生 CPU/OpenMP 线程数 |
 | `--fidelity LEVEL` | `medium` | 当前只接受 `medium` |
 | `--training FILE` | 随模式选择 | Smarties JSON 网络与学习参数 |
 | `--smoke-steps N` | 1 | smoke 模式推进的 IBAMR 步数 |
-| `--task FILE` | train 必填 | eel2d 状态、动作、奖励与控制周期配置 |
+| `--task FILE` | train/eval 必填 | eel2d 状态、动作、奖励与控制周期配置 |
 | `--train-steps N` | 1 | 启动数据之后的环境 transition 预算 |
 | `--train-updates N` | 0 | 精确的原生优化器更新预算；大于 0 时替代 steps 预算 |
+| `--checkpoint DIR` | eval 必填 | 包含网络权重和缩放数据的 `learner-audit/final` 目录 |
+| `--eval-episodes N` | 1 | 冻结策略评估的 Smarties 逻辑段数 |
 | `--end-time T` | 10.0 | IBAMR 正有限物理终止时间 |
-| `--long-run-output` | 关闭 | train 模式专用：关闭 Smarties 全样本记录，仅保留初始/终态 CFD 可视化快照及必要审计产物 |
+| `--long-run-output` | 关闭 | train/eval 可用：关闭 Smarties 全样本记录，仅保留初始/终态 CFD 可视化快照及必要审计产物 |
 | `--fault-after-initialize` | 关闭 | 仅用于验证初始化后的协调失败路径 |
 | `--dry-run` | 关闭 | 预检并打印派生命令，不启动 MPI 作业 |
 
@@ -283,6 +310,7 @@ checkpoint 和复现实验所需的汇总指标。原始 observation、频繁可
 | 现象或信息 | 含义与处理边界 |
 |---|---|
 | `EEL_CONTROL_COMPLETE ... stopped_by=smarties` 且 `exit_code.txt` 为 0 | Smarties 先达到训练预算，环境完成正常逆序销毁 |
+| eval 的审计含 `stage=restart`、不含 `stage=update`，且退出码为 0 | checkpoint 已由冻结策略加载并完成真实 IBAMR 评估 |
 | `IBAMR end time reached before Smarties training termination` | 物理 `END_TIME` 小于训练所需时间；已发送截断 transition 后走协调失败路径 |
 | `requires gcc/g++ 8.5.0`、`mpicc uses ...` | 未加载指定环境或 MPI wrapper 编译器不匹配 |
 | `patched IBAMR overlay is incomplete` | overlay 未完成安装或使用了错误 prefix，重新运行 prepare/build 脚本 |

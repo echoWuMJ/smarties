@@ -42,6 +42,7 @@ struct ControlOptions
 {
   std::string input_file = "input2d";
   std::string task_file;
+  unsigned evaluation_episodes = 0;
   bool fault_after_initialize = false;
 };
 
@@ -63,6 +64,20 @@ unsigned parsePositiveUnsigned(const char* text, MPI_Comm comm)
   if (errno != 0 || end == text || *end != '\0' || value == 0 ||
       value > std::numeric_limits<unsigned>::max()) {
     abortInvalidOption(comm, "--smoke-steps must be a positive integer");
+  }
+  return static_cast<unsigned>(value);
+}
+
+unsigned parseEvaluationEpisodes(const char* text, MPI_Comm comm)
+{
+  if (text == nullptr || *text == '\0')
+    abortInvalidOption(comm, "empty --nEvalEpisodes");
+  errno = 0;
+  char* end = nullptr;
+  const unsigned long value = std::strtoul(text, &end, 10);
+  if (errno != 0 || end == text || *end != '\0' || value == 0 ||
+      value > std::numeric_limits<unsigned>::max()) {
+    abortInvalidOption(comm, "--nEvalEpisodes must be a positive integer");
   }
   return static_cast<unsigned>(value);
 }
@@ -100,6 +115,11 @@ ControlOptions parseControlOptions(int argc, char** argv, MPI_Comm comm)
     else if (argument == "--task-file") {
       if (++i >= argc) abortInvalidOption(comm, "missing value after --task-file");
       options.task_file = argv[i];
+    }
+    else if (argument == "--nEvalEpisodes") {
+      if (++i >= argc)
+        abortInvalidOption(comm, "missing value after --nEvalEpisodes");
+      options.evaluation_episodes = parseEvaluationEpisodes(argv[i], comm);
     }
     else if (argument == "--fault-after-initialize") {
       options.fault_after_initialize = true;
@@ -401,6 +421,15 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
               step.segment, step.segment_decision, step.total_decisions,
               reason);
             std::fflush(stdout);
+          }
+
+          // Smarties announces evaluation completion on a later state/action
+          // exchange. Once this single environment has supplied the requested
+          // episodes, finish that handshake without advancing IBAMR again.
+          if (options.evaluation_episodes > 0 &&
+              segments.completedSegments() >= options.evaluation_episodes) {
+            awaitTrainingTermination(comm, asVector(state), environment_comm,
+                                     "speed-tracking evaluation");
           }
         }
 

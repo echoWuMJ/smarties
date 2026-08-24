@@ -193,6 +193,10 @@ fi
 cat >"$fixture_root/activity-settings.json" <<'EOF'
 {"learner":"VRACER","batchSize":4,"minTotObsNum":1,"obsPerStep":1}
 EOF
+eval_checkpoint="$fixture_root/checkpoint/final"
+mkdir -p "$eval_checkpoint"
+printf 'weights\n' >"$eval_checkpoint/agent_00_net_weights.raw"
+printf 'scaling\n' >"$eval_checkpoint/agent_00_scaling.raw"
 cat >"$fixture_root/batch-too-small.json" <<'EOF'
 {"learner":"VRACER","batchSize":2,"minTotObsNum":1,"obsPerStep":1}
 EOF
@@ -285,6 +289,71 @@ assert_contains "$output" "EEL_VIZ_DUMP_INTERVAL=1000000000"
 assert_contains "$output" "EEL_RESTART_DUMP_INTERVAL=0"
 assert_contains "$output" "EEL_TIMER_DUMP_INTERVAL=0"
 assert_contains "$output" "--logAllSamples 0"
+
+output=$(bash "$run_script" eval --dry-run --envs 1 --ranks-per-env 16 \
+  --learner-ranks 1 --learner-threads 2 --fidelity medium \
+  --training "$fixture_root/activity-settings.json" \
+  --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf \
+  --checkpoint "$eval_checkpoint" --eval-episodes 3 --end-time 20 \
+  --long-run-output)
+assert_contains "$output" "ENVIRONMENT_RANKS=16"
+assert_contains "$output" "MPI_RANKS=17"
+assert_contains "$output" "CONTROL_STAGE=stage2_policy_evaluation"
+assert_contains "$output" "EVAL_EPISODES=3"
+assert_contains "$output" "CHECKPOINT=$eval_checkpoint"
+assert_contains "$output" "--nTrainSteps 0"
+assert_contains "$output" "--nTrainUpdates 0"
+assert_contains "$output" "--nEvalEpisodes 3"
+assert_contains "$output" "--restart $eval_checkpoint"
+assert_contains "$output" "--eel-mode speed-tracking"
+assert_contains "$output" "--task-file task.conf"
+assert_contains "$output" "OUTPUT_PROFILE=long-run-sparse"
+
+if capture_status "$fixture_root/eval-multiple-environments.log" \
+  bash "$run_script" eval --dry-run --envs 2 --ranks-per-env 2 \
+    --training "$fixture_root/activity-settings.json" \
+    --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf \
+    --checkpoint "$eval_checkpoint"; then
+  fail "eval accepted multiple environments with an ambiguous local episode budget"
+fi
+assert_contains "$(<"$fixture_root/eval-multiple-environments.log")" \
+  "eval mode requires --envs 1 for exact episode budgeting"
+assert_not_contains "$(<"$fixture_root/eval-multiple-environments.log")" "COMMAND="
+
+if capture_status "$fixture_root/eval-missing-checkpoint.log" \
+  bash "$run_script" eval --dry-run --envs 1 --ranks-per-env 2 \
+    --training "$fixture_root/activity-settings.json" \
+    --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf; then
+  fail "eval accepted a missing --checkpoint option"
+fi
+assert_contains "$(<"$fixture_root/eval-missing-checkpoint.log")" \
+  "--checkpoint is required for eval mode"
+assert_not_contains "$(<"$fixture_root/eval-missing-checkpoint.log")" "COMMAND="
+
+incomplete_checkpoint="$fixture_root/checkpoint-incomplete/final"
+mkdir -p "$incomplete_checkpoint"
+printf 'weights\n' >"$incomplete_checkpoint/agent_00_net_weights.raw"
+if capture_status "$fixture_root/eval-incomplete-checkpoint.log" \
+  bash "$run_script" eval --dry-run --envs 1 --ranks-per-env 2 \
+    --training "$fixture_root/activity-settings.json" \
+    --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf \
+    --checkpoint "$incomplete_checkpoint"; then
+  fail "eval accepted a checkpoint without scaling data"
+fi
+assert_contains "$(<"$fixture_root/eval-incomplete-checkpoint.log")" \
+  "checkpoint scaling file not found"
+assert_not_contains "$(<"$fixture_root/eval-incomplete-checkpoint.log")" "COMMAND="
+
+if capture_status "$fixture_root/eval-training-budget.log" \
+  bash "$run_script" eval --dry-run --envs 1 --ranks-per-env 2 \
+    --training "$fixture_root/activity-settings.json" \
+    --task couplings/ibamr/tests/fixtures/speed_tracking_protocol.conf \
+    --checkpoint "$eval_checkpoint" --train-updates 1; then
+  fail "eval accepted a training budget"
+fi
+assert_contains "$(<"$fixture_root/eval-training-budget.log")" \
+  "training budgets are not valid in eval mode"
+assert_not_contains "$(<"$fixture_root/eval-training-budget.log")" "COMMAND="
 
 if capture_status "$fixture_root/train-budget-conflict.log" \
   bash "$run_script" train --dry-run --envs 1 --ranks-per-env 2 \
@@ -430,22 +499,35 @@ if [[ ${FAKE_EEL_ORTED_RESIDUAL:-0} == 1 ]]; then
   printf '%s\n' "$!" >"$FAKE_EEL_ORTED_RESIDUAL_PID_FILE"
 fi
 audit=none
+restart=none
+eval_episodes=0
 while (($#)); do
   case $1 in
     --learnerAuditDir) audit=$2; shift 2 ;;
+    --restart) restart=$2; shift 2 ;;
+    --nEvalEpisodes) eval_episodes=$2; shift 2 ;;
     *) shift ;;
   esac
 done
 if [[ $audit != none ]]; then
   mkdir -p "$audit/initial" "$audit/final"
   printf 'initial\n' >"$audit/initial/agent_00_net_weights.raw"
+  printf 'initial scaling\n' >"$audit/initial/agent_00_scaling.raw"
   printf 'final\n' >"$audit/final/agent_00_net_weights.raw"
-  cat >"$audit/learner_audit.log" <<'AUDIT'
+  printf 'final scaling\n' >"$audit/final/agent_00_scaling.raw"
+  if [[ $restart != none && $eval_episodes -gt 0 ]]; then
+    cat >"$audit/learner_audit.log" <<'AUDIT'
+SMARTIES_NETWORK_AUDIT stage=restart network=agent_00_network0 step=2 threads=4 precision_bytes=4 params=544 digest=3333333333333333 sum=0 sum_squares=1 max_abs=1 finite=1
+SMARTIES_NETWORK_AUDIT stage=final network=agent_00_network0 step=2 threads=4 precision_bytes=4 params=544 digest=3333333333333333 sum=0 sum_squares=1 max_abs=1 finite=1
+AUDIT
+  else
+    cat >"$audit/learner_audit.log" <<'AUDIT'
 SMARTIES_NETWORK_AUDIT stage=initialized network=agent_00_network0 step=0 threads=4 precision_bytes=4 params=544 digest=1111111111111111 sum=0 sum_squares=1 max_abs=1 finite=1
 SMARTIES_NETWORK_AUDIT stage=update network=agent_00_network0 step=1 threads=4 precision_bytes=4 params=544 digest=2222222222222222 sum=0 sum_squares=1 max_abs=1 finite=1
 SMARTIES_NETWORK_AUDIT stage=update network=agent_00_network0 step=2 threads=4 precision_bytes=4 params=544 digest=3333333333333333 sum=0 sum_squares=1 max_abs=1 finite=1
 SMARTIES_NETWORK_AUDIT stage=final network=agent_00_network0 step=2 threads=4 precision_bytes=4 params=544 digest=3333333333333333 sum=0 sum_squares=1 max_abs=1 finite=1
 AUDIT
+  fi
   printf 'EEL_CONTROL segment=1 segment_decision=1 decision=1 action=0 target_ratio=1 applied_ratio=1 start_time=0 end_time=0.1 ibamr_steps=100 forward_velocity=0 reward_tracking=-0.1 reward_frequency=0 reward_smoothness=0 reward_total=-0.1 lagrangian_points=2932\n'
   printf 'EEL_CONTROL segment=1 segment_decision=2 decision=2 action=0 target_ratio=1 applied_ratio=1 start_time=0.1 end_time=0.2 ibamr_steps=100 forward_velocity=0 reward_tracking=-0.1 reward_frequency=0 reward_smoothness=0 reward_total=-0.1 lagrangian_points=2932\n'
   printf 'EEL_CONTROL_SEGMENT segment=1 decisions=2 total_decisions=2 status=truncated reason=logical_horizon\n'
@@ -607,6 +689,32 @@ assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
   "network_precision_bytes=4"
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
   "learner_audit_dir=$real_train_run_dir/learner-audit"
+
+output=$(bash "$run_script" eval --source "$fixture_source" \
+  --build "$fixture_build" --envs 1 --ranks-per-env 1 --fidelity medium \
+  --training "$real_train_run_dir/settings.json" \
+  --task "$real_train_run_dir/task.conf" \
+  --checkpoint "$real_train_run_dir/learner-audit/final" \
+  --eval-episodes 2 --end-time 12.5)
+assert_contains "$output" "fixture coupling completed"
+assert_contains "$output" "CONTROL_STAGE=stage2_policy_evaluation"
+real_eval_run_dir=$(printf '%s\n' "$output" | sed -n 's/^RUN_DIRECTORY=//p')
+[[ "$(<"$real_eval_run_dir/exit_code.txt")" == 0 ]] ||
+  fail "eval path did not preserve exit zero"
+eval_manifest=$(<"$real_eval_run_dir/manifest.txt")
+assert_contains "$eval_manifest" "run_mode=eval"
+assert_contains "$eval_manifest" "eval_episodes=2"
+assert_contains "$eval_manifest" \
+  "checkpoint=$real_train_run_dir/learner-audit/final"
+assert_contains "$eval_manifest" "train_steps=0"
+assert_contains "$eval_manifest" "train_updates=0"
+assert_contains "$eval_manifest" "train_budget_kind=not-applicable"
+assert_contains "$eval_manifest" "task_file=$real_eval_run_dir/task.conf"
+if grep -q 'stage=update' "$real_eval_run_dir/learner-audit/learner_audit.log"; then
+  fail "eval fixture performed a learner update"
+fi
+grep -q 'stage=restart' "$real_eval_run_dir/learner-audit/learner_audit.log" ||
+  fail "eval fixture did not load the checkpoint"
 
 output=$(bash "$run_script" train --source "$fixture_source" \
   --build "$fixture_build" --envs 1 --ranks-per-env 2 \

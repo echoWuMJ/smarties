@@ -13,6 +13,7 @@ usage()
 Usage:
   run_node3.sh smoke [options]
   run_node3.sh train [options]
+  run_node3.sh eval [options]
 
 Smoke options:
   --envs N                 Concurrent IBAMR environments (default: 1)
@@ -34,9 +35,17 @@ Train options additionally require:
   --end-time T             Positive finite simulation end time (default: 10.0)
   --long-run-output        Keep only initial/final CFD fields and disable full sample logging
 
-Smoke validates process ownership and the communication lifecycle. Train runs
-the stage-two continuing frequency-control path with Smarties' native CPU
-learner; it does not establish policy quality or independent reset support.
+Eval options additionally require:
+  --checkpoint DIR         Smarties learner checkpoint directory
+  --eval-episodes N        Logical policy-evaluation segments (default: 1)
+  --task FILE              Eel control task used by the evaluated policy
+  --long-run-output        Keep only initial/final CFD fields and disable full sample logging
+
+Smoke validates process ownership and the communication lifecycle. Train and
+eval use the same stage-two continuing frequency-control path. Eval reloads a
+checkpoint, disables optimizer updates, and runs the policy in the real IBAMR
+environment; it does not create an independent physical reset between logical
+evaluation segments.
 EOF
 }
 
@@ -140,8 +149,8 @@ mode=${1:-}
 }
 shift
 
-if [[ $mode != smoke && $mode != train ]]; then
-  die "mode must be 'smoke' or 'train'" 64
+if [[ $mode != smoke && $mode != train && $mode != eval ]]; then
+  die "mode must be 'smoke', 'train', or 'eval'" 64
 fi
 
 envs=1
@@ -154,6 +163,9 @@ train_steps=1
 train_updates=0
 train_steps_explicit=0
 train_updates_explicit=0
+eval_episodes=1
+eval_episodes_explicit=0
+checkpoint=
 simulation_end_time=10.0
 task=
 build_dir=
@@ -168,14 +180,18 @@ if [[ $mode == smoke ]]; then
 else
   training=couplings/ibamr/configs/training/speed_tracking.json
   eel_mode=speed-tracking
-  control_stage=stage2_physical_control_experimental
+  if [[ $mode == train ]]; then
+    control_stage=stage2_physical_control_experimental
+  else
+    control_stage=stage2_policy_evaluation
+  fi
   state_dimension=5
 fi
 action_dimension=1
 
 while (($#)); do
   case $1 in
-    --envs|--ranks-per-env|--learner-ranks|--learner-threads|--fidelity|--training|--smoke-steps|--train-steps|--train-updates|--end-time|--task|--source|--build)
+    --envs|--ranks-per-env|--learner-ranks|--learner-threads|--fidelity|--training|--smoke-steps|--train-steps|--train-updates|--eval-episodes|--checkpoint|--end-time|--task|--source|--build)
       (($# >= 2)) || die "missing value after $1"
       option=$1
       value=$2
@@ -197,6 +213,11 @@ while (($#)); do
           train_updates=$value
           train_updates_explicit=1
           ;;
+        --eval-episodes)
+          eval_episodes=$value
+          eval_episodes_explicit=1
+          ;;
+        --checkpoint) checkpoint=$value ;;
         --end-time) simulation_end_time=$value ;;
         --task) task=$value ;;
         --source) source_dir=$value ;;
@@ -247,9 +268,23 @@ if [[ $mode == train ]]; then
       die "--train-steps must be a positive integer"
   fi
   [[ -n $task ]] || die "--task is required for train mode"
+elif [[ $mode == eval ]]; then
+  if ((train_steps_explicit || train_updates_explicit)); then
+    die "training budgets are not valid in eval mode"
+  fi
+  is_positive_integer "$eval_episodes" ||
+    die "--eval-episodes must be a positive integer"
+  [[ $envs == 1 ]] ||
+    die "eval mode requires --envs 1 for exact episode budgeting"
+  [[ -n $checkpoint ]] || die "--checkpoint is required for eval mode"
+  [[ -n $task ]] || die "--task is required for eval mode"
+else
+  if ((eval_episodes_explicit)); then
+    die "--eval-episodes is only valid in eval mode"
+  fi
 fi
-if ((long_run_output)) && [[ $mode != train ]]; then
-  die "--long-run-output is only valid in train mode"
+if ((long_run_output)) && [[ $mode == smoke ]]; then
+  die "--long-run-output is only valid in train or eval mode"
 fi
 if [[ ! $simulation_end_time =~ ^[+-]?(([0-9]+([.][0-9]*)?)|([.][0-9]+))([eE][+-]?[0-9]+)?$ ]] ||
    ! awk -v value="$simulation_end_time" 'BEGIN {
@@ -273,6 +308,14 @@ if [[ $training != /* ]]; then
   training="$source_dir/$training"
 fi
 [[ -f "$training" ]] || die "training settings not found: $training"
+if [[ $mode != smoke ]]; then
+  if [[ $task != /* ]]; then
+    task="$source_dir/$task"
+  fi
+  [[ -f "$task" ]] || die "task configuration not found: $task"
+  validate_task_config "$task" ||
+    die "invalid task configuration: $task"
+fi
 if [[ $mode == train ]]; then
   batch_size=$(sed -n \
     's/.*"batchSize"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
@@ -285,12 +328,6 @@ if [[ $mode == train ]]; then
   if ((batch_size % learner_threads != 0)); then
     die "batchSize must be divisible by learner threads"
   fi
-  if [[ $task != /* ]]; then
-    task="$source_dir/$task"
-  fi
-  [[ -f "$task" ]] || die "task configuration not found: $task"
-  validate_task_config "$task" ||
-    die "invalid task configuration: $task"
   minimum_training_observations=$(sed -n \
     's/.*"minTotObsNum"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
     "$training" | tail -n 1)
@@ -310,8 +347,23 @@ if [[ $mode == train ]]; then
   ' "$task" | tail -n 1)
   is_positive_integer "$episode_decisions" ||
     die "task configuration has invalid episode_decisions: $task"
+elif [[ $mode == eval ]]; then
+  batch_size=$(sed -n \
+    's/.*"batchSize"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+    "$training" | tail -n 1)
+  is_positive_integer "$batch_size" ||
+    die "evaluation settings require a positive integer batchSize: $training"
 else
   batch_size=not-applicable
+fi
+
+if [[ $mode == eval ]]; then
+  [[ -d "$checkpoint" ]] || die "checkpoint directory not found: $checkpoint"
+  checkpoint=$(cd "$checkpoint" && pwd)
+  [[ -f "$checkpoint/agent_00_net_weights.raw" ]] ||
+    die "checkpoint network weights file not found: $checkpoint/agent_00_net_weights.raw"
+  [[ -f "$checkpoint/agent_00_scaling.raw" ]] ||
+    die "checkpoint scaling file not found: $checkpoint/agent_00_scaling.raw"
 fi
 
 environment_ranks=$((envs * ranks_per_env))
@@ -456,6 +508,12 @@ else
   effective_train_updates=0
   train_budget_kind=not-applicable
 fi
+restart_checkpoint=none
+effective_eval_episodes=0
+if [[ $mode == eval ]]; then
+  restart_checkpoint=$checkpoint
+  effective_eval_episodes=$eval_episodes
+fi
 learner_activity_gate=0
 if [[ $mode == train &&
       $(basename "$training") == cpu_learner_eel_activity.json ]]; then
@@ -475,7 +533,7 @@ launch_args=(
   --nTrainSteps "$effective_train_steps"
   --nTrainUpdates "$effective_train_updates"
   --logAllSamples "$log_all_samples"
-  --restart none
+  --restart "$restart_checkpoint"
   --setupFolder .
   --input-file input2d
   --eel-mode "$eel_mode"
@@ -485,6 +543,9 @@ if [[ $mode == smoke ]]; then
   launch_args+=(--smoke-steps "$smoke_steps")
 else
   launch_args+=(--task-file task.conf --learnerAuditDir "$learner_audit_dir")
+fi
+if [[ $mode == eval ]]; then
+  launch_args+=(--nEvalEpisodes "$effective_eval_episodes")
 fi
 
 if ((fault_after_initialize)); then
@@ -506,6 +567,7 @@ printf 'SOURCE=%s\n' "$source_dir"
 printf 'BUILD=%s\n' "$build_dir"
 printf 'RUN_ID=%s\n' "$run_id"
 printf 'RUN_DIRECTORY=%s\n' "$run_dir"
+printf 'RUN_MODE=%s\n' "$mode"
 printf 'LEARNER_RANKS=%s\n' "$learner_ranks"
 printf 'LEARNER_THREADS=%s\n' "$learner_threads"
 printf 'LEARNER_ACTIVITY_GATE=%s\n' "$learner_activity_gate"
@@ -524,6 +586,8 @@ printf 'NETWORK_PRECISION_BYTES=%s\n' "$network_precision_bytes"
 printf 'TRAIN_STEPS=%s\n' "$effective_train_steps"
 printf 'TRAIN_UPDATES=%s\n' "$effective_train_updates"
 printf 'TRAIN_BUDGET_KIND=%s\n' "$train_budget_kind"
+printf 'EVAL_EPISODES=%s\n' "$effective_eval_episodes"
+printf 'CHECKPOINT=%s\n' "$restart_checkpoint"
 printf 'SIMULATION_END_TIME=%s\n' "$simulation_end_time"
 printf 'OUTPUT_PROFILE=%s\n' "$output_profile"
 printf 'LOG_ALL_SAMPLES=%s\n' "$log_all_samples"
@@ -561,7 +625,7 @@ render_fidelity()
 render_fidelity "$fidelity" "$run_dir/input2d"
 cp "$vertex_file" "$run_dir/eel2d.vertex"
 cp "$training" "$run_dir/settings.json"
-if [[ $mode == train ]]; then
+if [[ $mode != smoke ]]; then
   cp "$task" "$run_dir/task.conf"
   task_file_manifest="$run_dir/task.conf"
   task_sha256=$(sha256sum "$run_dir/task.conf" | awk '{print $1}')
@@ -573,6 +637,7 @@ fi
 manifest="$run_dir/manifest.txt"
 {
   printf 'run_id=%s\n' "$run_id"
+  printf 'run_mode=%s\n' "$mode"
   printf 'utc_timestamp=%s\n' "$timestamp"
   printf 'revision=%s\n' "$revision"
   printf 'source=%s\n' "$source_dir"
@@ -617,6 +682,8 @@ manifest="$run_dir/manifest.txt"
   printf 'train_steps=%s\n' "$effective_train_steps"
   printf 'train_updates=%s\n' "$effective_train_updates"
   printf 'train_budget_kind=%s\n' "$train_budget_kind"
+  printf 'eval_episodes=%s\n' "$effective_eval_episodes"
+  printf 'checkpoint=%s\n' "$restart_checkpoint"
   printf 'simulation_end_time=%s\n' "$simulation_end_time"
   printf 'output_profile=%s\n' "$output_profile"
   printf 'log_all_samples=%s\n' "$log_all_samples"
