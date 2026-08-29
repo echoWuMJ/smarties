@@ -274,6 +274,11 @@ if(BUILD_IBAMR_COUPLING)
     ibamr_eel2d_environment
     ibamr_coupling_core)
 
+  add_executable(eel_terminal_visualization test_eel_terminal_visualization.cpp)
+  target_link_libraries(eel_terminal_visualization PRIVATE
+    ibamr_eel2d_environment
+    ibamr_coupling_core)
+
   set(EEL_ENVIRONMENT_RUN_DIR "${CMAKE_CURRENT_BINARY_DIR}/eel-environment-smoke")
   file(MAKE_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}")
   execute_process(
@@ -307,6 +312,24 @@ if(BUILD_IBAMR_COUPLING)
     "${EEL_ENVIRONMENT_RUN_DIR}/task.continuing.conf"
     COPYONLY)
 
+  set(EEL_TERMINAL_VISUALIZATION_RUN_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/eel-terminal-visualization")
+  file(MAKE_DIRECTORY "${EEL_TERMINAL_VISUALIZATION_RUN_DIR}")
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIDELITY_FILE=${CMAKE_CURRENT_SOURCE_DIR}/../configs/fidelity/medium.conf"
+      "-DEEL_END_TIME=0.0001"
+      "-DEEL_VIZ_DUMP_INTERVAL=1"
+      "-DEEL_RESTART_DUMP_INTERVAL=0"
+      "-DEEL_TIMER_DUMP_INTERVAL=0"
+      "-DOUTPUT_FILE=${EEL_TERMINAL_VISUALIZATION_RUN_DIR}/input2d"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/render_input.cmake"
+    COMMAND_ERROR_IS_FATAL ANY)
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d/upstream/eel2d.vertex"
+    "${EEL_TERMINAL_VISUALIZATION_RUN_DIR}/eel2d.vertex"
+    COPYONLY)
+
   add_test(
     NAME eel_environment_smoke
     COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
@@ -323,6 +346,15 @@ if(BUILD_IBAMR_COUPLING)
             input2d ${MPIEXEC_POSTFLAGS})
   set_tests_properties(eel_environment_control PROPERTIES
     WORKING_DIRECTORY "${EEL_ENVIRONMENT_RUN_DIR}"
+    TIMEOUT 180)
+
+  add_test(
+    NAME eel_terminal_visualization
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
+            ${MPIEXEC_PREFLAGS} $<TARGET_FILE:eel_terminal_visualization>
+            input2d ${MPIEXEC_POSTFLAGS})
+  set_tests_properties(eel_terminal_visualization PROPERTIES
+    WORKING_DIRECTORY "${EEL_TERMINAL_VISUALIZATION_RUN_DIR}"
     TIMEOUT 180)
 
   add_test(

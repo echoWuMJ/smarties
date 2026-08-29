@@ -74,6 +74,8 @@ public:
   ~Impl() { shutdown(); }
 
 private:
+  void writeVisualizationData();
+
   bool ready_ = false;
   bool shutdown_started_ = false;
   MPI_Comm environment_comm_ = MPI_COMM_NULL;
@@ -122,6 +124,7 @@ private:
   int u_idx_ = -1;
   int p_idx_ = -1;
   int iteration_num_ = 0;
+  int last_visualization_iteration_ = -1;
   double loop_time_ = 0.0;
   double loop_time_end_ = 0.0;
   double box_disp_ = 0.0;
@@ -155,6 +158,7 @@ EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& i
   // Restore the environment communicator before AppInitializer broadcasts.
   SAMRAI::tbox::SAMRAI_MPI::setCommunicator(environment_comm_);
   shutdown_started_ = false;
+  last_visualization_iteration_ = -1;
 
   try
   {
@@ -316,9 +320,7 @@ EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& i
     if (dump_viz_data_ && uses_visit_)
     {
       pout << "\n\nWriting visualization files...\n\n";
-      time_integrator_->setupPlotData();
-      visit_data_writer_->writePlotData(patch_hierarchy_, iteration_num_, loop_time_);
-      silo_data_writer_->writePlotData(iteration_num_, loop_time_);
+      writeVisualizationData();
     }
 
     loop_time_end_ = time_integrator_->getEndTime();
@@ -380,10 +382,19 @@ void
 EelEnvironment::Impl::writeVisualizationSnapshot()
 {
   if (!ready_) throw std::logic_error("EelEnvironment is not initialized");
-  if (!dump_viz_data_ || !uses_visit_) return;
+  writeVisualizationData();
+}
+
+void
+EelEnvironment::Impl::writeVisualizationData()
+{
+  if (!dump_viz_data_ || !uses_visit_ ||
+      last_visualization_iteration_ == iteration_num_)
+    return;
   time_integrator_->setupPlotData();
   visit_data_writer_->writePlotData(patch_hierarchy_, iteration_num_, loop_time_);
   silo_data_writer_->writePlotData(iteration_num_, loop_time_);
+  last_visualization_iteration_ = iteration_num_;
 }
 
 void
@@ -498,9 +509,7 @@ EelEnvironment::Impl::advanceOneStep()
       (iteration_num_ % viz_dump_interval_ == 0 || last_step))
   {
     pout << "\nWriting visualization files...\n\n";
-    time_integrator_->setupPlotData();
-    visit_data_writer_->writePlotData(patch_hierarchy_, iteration_num_, loop_time_);
-    silo_data_writer_->writePlotData(iteration_num_, loop_time_);
+    writeVisualizationData();
   }
   if (dump_restart_data_ &&
       (iteration_num_ % restart_dump_interval_ == 0 || last_step))
