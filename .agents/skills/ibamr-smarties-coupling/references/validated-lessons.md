@@ -71,3 +71,15 @@ short-test output settings can grow without bound in a long run.
 **Boundary:** define a run-specific retention policy before long training. A
 checkpoint supports restart/evaluation; it does not replace physical field
 output needed for later CFD analysis.
+
+## Terminal visualization
+
+The case loop and the Smarties adapter may both request output at a terminal
+boundary. If the case already writes visualization on `last_step`, the explicit
+terminal snapshot must be idempotent by the solver iteration. Record the last
+successfully written iteration and skip only an identical request; still write
+when Smarties stops between scheduled CFD dumps.
+
+**Boundary:** the verified eel2d implementation covers VisIt/Silo visualization.
+Restart, postprocessing, and checkpoint writers have separate sequencing and
+must not be assumed idempotent without their own validation.

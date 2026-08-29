@@ -43,8 +43,21 @@ One control interval is `2*pi / (decisions_per_baseline_period * baseline_angula
 
 Smarties termination is checked after each protocol exchange. If IBAMR reaches physical `END_TIME` first, the adapter publishes the truncated final transition and enters the coordinated fatal path; it must not return normally and allow an unintended second environment callback.
 
+The adapter requests one terminal visualization snapshot before shutdown.
+`EelEnvironment` deduplicates this request by IBAMR iteration because the
+official-style time loop also writes its last step. An early Smarties terminal
+between scheduled dumps still produces a final snapshot.
+
 ## Bounded validation result
 
 At source revision `f4bc6d8835634302b93ec5341a504d96e6f2f874`, node3 validation used GCC 8.5, Open MPI 5.0.9, IBAMR 0.18, CPU Smarties, one learner rank, one two-rank IBAMR environment, and two learner threads. The medium run completed two logical segments, four decisions, 5004 IBAMR steps, retained 2932 global Lagrangian points, performed exactly two finite native CPU learner updates, and reloaded a checkpoint with the same final network digest. A bounded early-`END_TIME` run reached the coordinated fatal path without observed callback reentry. Revision `b376ee7` added only scoped `orted` cleanup detection.
 
 This evidence supports bounded coupling correctness for that topology and environment. It does not establish policy quality, reward calibration, convergence, long-run repeatability, independent physical reset, PyTorch/CUDA support, or compatibility with another IBAMR/SAMRAI version.
+
+Revision `d9af395df2ee80e9dcc98c345e11140ed3dbce06` adds terminal
+visualization idempotence. On node03, the parent implementation reproduced the
+VisIt non-increasing-step abort in a one-step real IBAMR test; the fixed test
+passed twice, produced one Eulerian and one Lagrangian entry for the terminal
+iteration, left no test process, and the neighboring environment smoke and
+control tests passed. This validates terminal VisIt/Silo sequencing only; it
+does not extend the policy or numerical-validation claims above.

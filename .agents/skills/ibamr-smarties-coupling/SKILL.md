@@ -31,7 +31,7 @@ description: Use when designing, implementing, porting, installing, reviewing, d
 3. Keep state/action/reward definitions, control cadence, terminal policy, and Smarties messages in a thin case adapter.
 4. Keep `main()` limited to MPI ownership, rank partitioning, borrowed Smarties startup, environment dispatch, ordered destruction, and finalization.
 5. Define explicitly whether an episode boundary is logical continuation, partial reset, or full physical reset; never infer reset semantics from `sendLastState()`.
-6. Define output retention before a long run so CFD visualization, per-step samples, checkpoints, and restart data do not grow without a stated purpose.
+6. Define output retention before a long run so CFD visualization, per-step samples, checkpoints, and restart data do not grow without a stated purpose. Make an adapter-requested terminal snapshot idempotent with the case loop's scheduled and last-step output.
 
 ## Verification and experience
 
