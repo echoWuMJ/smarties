@@ -105,6 +105,8 @@ public:
 
     double getTailBeatAngularFrequency() const;
 
+    double getBodyAxisAngle() const;
+
     std::size_t getGlobalLagrangianPointCount() const;
 
     /*!

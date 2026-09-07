@@ -130,12 +130,12 @@ ControlOptions parseControlOptions(int argc, char** argv, MPI_Comm comm)
   return options;
 }
 
-std::vector<double> asVector(const std::array<double, 5>& state)
+std::vector<double> asVector(const EelState& state)
 {
   return std::vector<double>(state.begin(), state.end());
 }
 
-bool finiteTransition(const std::array<double, 5>& state,
+bool finiteTransition(const EelState& state,
                       const RewardBreakdown& reward)
 {
   for (const double value : state) {
@@ -145,12 +145,28 @@ bool finiteTransition(const std::array<double, 5>& state,
          std::isfinite(reward.smoothness) && std::isfinite(reward.total);
 }
 
-bool finiteState(const std::array<double, 5>& state)
+bool finiteState(const EelState& state)
 {
   for (const double value : state) {
     if (!std::isfinite(value)) return false;
   }
   return true;
+}
+
+void printProbeSample(const unsigned decision,
+                      const EelVelocityProbeSample& sample)
+{
+  std::printf("EEL_PROBES decision=%u", decision);
+  for (std::size_t probe = 0; probe < EEL_PROBE_COUNT; ++probe)
+  {
+    std::printf(" p%zu_x=%.17g p%zu_y=%.17g p%zu_u=%.17g p%zu_v=%.17g",
+                probe, sample.positions[probe][0],
+                probe, sample.positions[probe][1],
+                probe, sample.velocities[probe][0],
+                probe, sample.velocities[probe][1]);
+  }
+  std::printf("\n");
+  std::fflush(stdout);
 }
 
 void awaitTrainingTermination(smarties::Communicator* const comm,
@@ -304,7 +320,10 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
                              int argc,
                              char** argv)
 {
-  control_protocol_report = { 0, 0, 0, 0, 0, 0, false, false, 5, 1 };
+  control_protocol_report = {
+    0, 0, 0, 0, 0, 0, false, false,
+    static_cast<unsigned>(EEL_CONTROL_STATE_DIMENSION), 1
+  };
   if (comm == nullptr || environment_comm == MPI_COMM_NULL) {
     MPI_Abort(MPI_COMM_WORLD, 96);
   }
@@ -316,7 +335,7 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
     const EelTaskConfig config = loadEelTaskConfig(options.task_file);
     EelControlTask task(config);
     comm->envHasDistributedAgents();
-    comm->setStateActionDims(5, 1);
+    comm->setStateActionDims(EEL_CONTROL_STATE_DIMENSION, 1);
     comm->setActionScales({ 1.0 }, { -1.0 }, true);
 
     EelEnvironment environment;
@@ -350,10 +369,13 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
     if (!environment.stepsRemaining())
       throw std::runtime_error("eel simulation ended before controlled episode");
 
-    std::array<double, 5> state =
-      task.makeState(forward_velocity, environment.currentTailBeatPhase());
+    EelVelocityProbeSample probe_sample = environment.sampleVelocityProbes();
+    EelState state = task.makeState(
+      forward_velocity, environment.currentTailBeatPhase(),
+      probe_sample.velocities);
     if (!finiteState(state))
       throw std::runtime_error("non-finite initial eel state");
+    if (environment_rank == 0) printProbeSample(0, probe_sample);
     EelLogicalSegments segments(config.episode_decisions);
     while (environment.stepsRemaining() && !comm->terminateTraining()) {
       segments.beginSegment();
@@ -371,8 +393,10 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
         const ControlIntervalResult interval =
           environment.advanceControlInterval(task.controlInterval());
         forward_velocity = forwardVelocity(interval, config);
+        probe_sample = environment.sampleVelocityProbes();
         state = task.makeState(forward_velocity,
-                               environment.currentTailBeatPhase());
+                               environment.currentTailBeatPhase(),
+                               probe_sample.velocities);
         const RewardBreakdown reward =
           task.reward(forward_velocity, decision.previous_ratio);
         if (!finiteTransition(state, reward))
@@ -389,6 +413,7 @@ void runSpeedTrackingEpisode(smarties::Communicator* const comm,
         control_protocol_report.finite_state_and_reward = true;
 
         if (environment_rank == 0) {
+          printProbeSample(step.total_decisions, probe_sample);
           std::printf(
             "EEL_CONTROL segment=%u segment_decision=%u decision=%u "
             "action=%.17g target_ratio=%.17g applied_ratio=%.17g "

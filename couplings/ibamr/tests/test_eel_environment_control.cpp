@@ -1,4 +1,5 @@
 #include "EelEnvironment.h"
+#include "EelVelocityProbes.h"
 #include "MpiSession.h"
 
 #include <mpi.h>
@@ -18,6 +19,45 @@ bool near(const double actual, const double expected, const double tolerance = 1
 bool finitePoint(const std::array<double, 2>& point)
 {
   return std::isfinite(point[0]) && std::isfinite(point[1]);
+}
+
+bool finiteProbeSample(
+  const ibamr_smarties::eel2d::EelVelocityProbeSample& sample)
+{
+  for (std::size_t probe = 0;
+       probe < ibamr_smarties::eel2d::EEL_PROBE_COUNT;
+       ++probe)
+  {
+    if (!finitePoint(sample.positions[probe]) ||
+        !finitePoint(sample.velocities[probe])) return false;
+  }
+  return true;
+}
+
+bool consistentProbeSample(
+  const ibamr_smarties::eel2d::EelVelocityProbeSample& sample,
+  MPI_Comm communicator)
+{
+  std::array<double, 4 * ibamr_smarties::eel2d::EEL_PROBE_COUNT> local;
+  std::size_t index = 0;
+  for (std::size_t probe = 0;
+       probe < ibamr_smarties::eel2d::EEL_PROBE_COUNT;
+       ++probe)
+  {
+    for (std::size_t d = 0; d < 2; ++d)
+      local[index++] = sample.positions[probe][d];
+    for (std::size_t d = 0; d < 2; ++d)
+      local[index++] = sample.velocities[probe][d];
+  }
+  std::array<double, 4 * ibamr_smarties::eel2d::EEL_PROBE_COUNT> minimum;
+  std::array<double, 4 * ibamr_smarties::eel2d::EEL_PROBE_COUNT> maximum;
+  MPI_Allreduce(local.data(), minimum.data(), static_cast<int>(local.size()),
+                MPI_DOUBLE, MPI_MIN, communicator);
+  MPI_Allreduce(local.data(), maximum.data(), static_cast<int>(local.size()),
+                MPI_DOUBLE, MPI_MAX, communicator);
+  for (std::size_t i = 0; i < local.size(); ++i)
+    if (!near(minimum[i], maximum[i])) return false;
+  return true;
 }
 
 template <class Exception, class Function>
@@ -42,12 +82,17 @@ int main(int argc, char** argv)
 {
   using ibamr_smarties::eel2d::ControlIntervalResult;
   using ibamr_smarties::eel2d::EelEnvironment;
+  using ibamr_smarties::eel2d::EelProbePoints;
+  using ibamr_smarties::eel2d::EelVelocityProbeSample;
+  using ibamr_smarties::eel2d::EEL_PROBE_COUNT;
+  using ibamr_smarties::eel2d::makeEelProbePoints;
   if (argc != 2) return 64;
 
   ibamr_smarties::MpiSession mpi(argc, argv);
   EelEnvironment environment;
   if (!throws<std::logic_error>([&] { environment.currentTime(); })) return 16;
   if (!throws<std::logic_error>([&] { environment.globalLagrangianPointCount(); })) return 17;
+  if (!throws<std::logic_error>([&] { environment.sampleVelocityProbes(); })) return 20;
   environment.initialize(mpi.world(), argv[1]);
   if (environment.globalLagrangianPointCount() != 2932) return 7;
 
@@ -61,6 +106,16 @@ int main(int argc, char** argv)
   const double initial_phase = environment.currentTailBeatPhase();
   if (!std::isfinite(initial_time) || !finitePoint(initial_com) ||
       !std::isfinite(initial_phase)) return 1;
+  const EelVelocityProbeSample initial_probes =
+    environment.sampleVelocityProbes();
+  if (!finiteProbeSample(initial_probes)) return 21;
+  if (!consistentProbeSample(initial_probes, mpi.world())) return 24;
+  const EelProbePoints expected_initial_positions =
+    makeEelProbePoints(initial_com, environment.currentBodyAxisAngle());
+  for (std::size_t probe = 0; probe < EEL_PROBE_COUNT; ++probe)
+    for (std::size_t d = 0; d < 2; ++d)
+      if (!near(initial_probes.positions[probe][d],
+                expected_initial_positions[probe][d])) return 22;
   if (!near(environment.currentTailBeatFrequencyRatio(), 1.0)) return 2;
 
   // Catches phase discontinuity at a command-safe point.
@@ -83,6 +138,10 @@ int main(int argc, char** argv)
   const std::array<double, 2> final_com = environment.currentCenterOfMass();
   if (!near(final_com[0], result.end_com[0]) ||
       !near(final_com[1], result.end_com[1])) return 13;
+  const EelVelocityProbeSample final_probes =
+    environment.sampleVelocityProbes();
+  if (!finiteProbeSample(final_probes)) return 23;
+  if (!consistentProbeSample(final_probes, mpi.world())) return 25;
 
   // Catches phase advancement based on requested rather than actual elapsed time.
   const double expected_phase =

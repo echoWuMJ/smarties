@@ -675,7 +675,7 @@ assert_contains "$(<"$real_train_run_dir/manifest.txt")" "train_budget_kind=step
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" "simulation_end_time=12.5"
 assert_contains "$(<"$FAKE_CMAKE_RENDER_LOG")" \
   "$real_train_run_dir/input2d|12.5"
-assert_contains "$(<"$real_train_run_dir/manifest.txt")" "state_dimension=5"
+assert_contains "$(<"$real_train_run_dir/manifest.txt")" "state_dimension=17"
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" "action_dimension=1"
 assert_contains "$(<"$real_train_run_dir/manifest.txt")" \
   "control_stage=stage2_physical_control_experimental"

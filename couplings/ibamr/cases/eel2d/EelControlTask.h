@@ -1,6 +1,8 @@
 #ifndef IBAMR_SMARTIES_EEL_CONTROL_TASK_H
 #define IBAMR_SMARTIES_EEL_CONTROL_TASK_H
 
+#include "EelVelocityProbes.h"
+
 #include <array>
 #include <iosfwd>
 #include <string>
@@ -54,7 +56,9 @@ public:
   explicit EelControlTask(EelTaskConfig config);
 
   ControlDecision applyAction(double action);
-  std::array<double, 5> makeState(double forward_velocity, double phase) const;
+  EelState makeState(double forward_velocity,
+                     double phase,
+                     const EelProbeVelocities& probe_velocities) const;
   RewardBreakdown reward(double forward_velocity, double previous_ratio) const;
   double controlInterval() const;
   unsigned clippedActionCount() const;

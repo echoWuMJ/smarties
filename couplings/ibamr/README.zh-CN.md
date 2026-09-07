@@ -360,7 +360,7 @@ learner 发送状态。当前实现和 `distributed_environment_shutdown` 回归
 ### 动作在何处插入，IBAMR 又在何处等待
 
 真实控制循环位于 `cases/eel2d/EelSmartiesAdapter.cpp`。环境先通过
-`comm->sendInitState(state)` 将当前五维状态交给 Smarties，然后执行：
+`comm->sendInitState(state)` 将当前 17 维状态交给 Smarties，然后执行：
 
 ```cpp
 const std::vector<double> action = comm->recvAction(); // 在这里阻塞等待 learner
@@ -383,9 +383,28 @@ const ControlIntervalResult interval =
 连续 `PHI` 和 `OMEGA` 注入原有的鱼形和变形速度解析器。
 
 动作是一个标量，经 `[-1,1]` 裁剪、线性映射到配置的频率比区间，再经过
-`maximum_ratio_delta` 限幅。状态为五维：归一化推进速度、归一化目标速度、当前
-频率比、连续相位的正弦和余弦。奖励等于速度跟踪平方惩罚、偏离基准频率平方
-惩罚和相邻动作平滑平方惩罚之和；频率项不是功耗或推进效率的物理测量。
+`maximum_ratio_delta` 限幅。状态为 17 维：前 5 维是归一化推进速度、归一化目标
+速度、当前频率比、连续相位的正弦和余弦；后 12 维是 6 个随鱼体平移和转动的
+探针处二维 Eulerian 流速，两个速度分量都除以 `velocity_scale`。
+
+6 个探针在鱼体坐标系中的位置按下列顺序固定，长度单位为当前 eel2d 的鱼长：
+
+```text
+p0=(-0.35,+0.10)  p1=(-0.35,-0.10)
+p2=( 0.00,+0.10)  p3=( 0.00,-0.10)
+p4=(+0.35,+0.10)  p5=(+0.35,-0.10)
+```
+
+每个控制边界使用当前质心和体轴角把这些点旋转、平移到全局坐标，并从带完整
+幽灵层的 side-centered 速度场用 IBTK `IB_4` 核采样。状态尾部顺序为
+`p0_u,p0_v,...,p5_u,p5_v`。`EEL_PROBES` 日志保存每个点的全局坐标和未归一化
+速度，便于核对观测。这里使用的是全局坐标系绝对流速，不是鱼体自身速度、相对
+流速或鱼体坐标投影。
+
+奖励仍等于速度跟踪平方惩罚、偏离基准频率平方惩罚和相邻动作平滑平方惩罚之和；
+频率项不是功耗或推进效率的物理测量。加入探针后，旧的 5 维 Agent checkpoint
+与新的 17 维网络输入不兼容；训练和评估必须使用同一版 17 维代码重新生成的
+checkpoint。
 
 ## 7. 迁移到其他 IBAMR 版本
 

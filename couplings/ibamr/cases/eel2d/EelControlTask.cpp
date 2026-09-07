@@ -183,14 +183,33 @@ EelControlTask::applyAction(const double action)
   return { action, target, previous, applied_ratio_, clipped };
 }
 
-std::array<double, 5>
-EelControlTask::makeState(const double forward_velocity, const double phase) const
+EelState
+EelControlTask::makeState(const double forward_velocity,
+                          const double phase,
+                          const EelProbeVelocities& probe_velocities) const
 {
   if (!std::isfinite(forward_velocity) || !std::isfinite(phase))
     throw std::invalid_argument("eel state inputs must be finite");
-  return {{ forward_velocity / config_.velocity_scale,
-            config_.target_forward_speed / config_.velocity_scale,
-            applied_ratio_, std::sin(phase), std::cos(phase) }};
+  EelState state = {{}};
+  state[0] = forward_velocity / config_.velocity_scale;
+  state[1] = config_.target_forward_speed / config_.velocity_scale;
+  state[2] = applied_ratio_;
+  state[3] = std::sin(phase);
+  state[4] = std::cos(phase);
+  for (std::size_t probe = 0; probe < EEL_PROBE_COUNT; ++probe)
+  {
+    for (std::size_t component = 0;
+         component < EEL_PROBE_COMPONENT_COUNT;
+         ++component)
+    {
+      const double value = probe_velocities[probe][component];
+      if (!std::isfinite(value))
+        throw std::invalid_argument("eel probe velocities must be finite");
+      state[5 + EEL_PROBE_COMPONENT_COUNT * probe + component] =
+        value / config_.velocity_scale;
+    }
+  }
+  return state;
 }
 
 RewardBreakdown

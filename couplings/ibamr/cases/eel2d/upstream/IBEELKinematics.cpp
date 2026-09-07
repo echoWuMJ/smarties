@@ -711,4 +711,10 @@ IBEELKinematics::getTailBeatAngularFrequency() const
     return d_tail_beat_phase.angularFrequency();
 }
 
+double
+IBEELKinematics::getBodyAxisAngle() const
+{
+    return d_initAngle_bodyAxis_x + d_incremented_angle_from_reference_axis[2];
+}
+
 } // namespace IBAMR

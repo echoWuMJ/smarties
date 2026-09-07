@@ -208,8 +208,10 @@ void runTaskDrivenProbe(const ProbeOptions& options,
       environment.advanceControlInterval(task.controlInterval());
     const double forward_velocity = forwardVelocity(interval, config);
     const double phase_end = environment.currentTailBeatPhase();
-    const std::array<double, 5> state =
-      task.makeState(forward_velocity, phase_end);
+    const EelVelocityProbeSample probe_sample =
+      environment.sampleVelocityProbes();
+    const EelState state =
+      task.makeState(forward_velocity, phase_end, probe_sample.velocities);
     const RewardBreakdown reward =
       task.reward(forward_velocity, decision.previous_ratio);
     for (const double value : state) {

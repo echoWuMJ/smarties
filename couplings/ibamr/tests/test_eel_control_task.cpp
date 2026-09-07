@@ -1,4 +1,5 @@
 #include "EelControlTask.h"
+#include "EelVelocityProbes.h"
 
 #include <cmath>
 #include <limits>
@@ -132,12 +133,26 @@ int main(int argc, char** argv)
 
   // Catches state reordering or wrapped phase representation.
   const double half_pi = 1.57079632679489661923;
-  const std::array<double, 5> state = upper_task.makeState(0.25, half_pi);
+  const EelProbeVelocities probe_velocities = {{
+    {{ 0.10, -0.20 }}, {{ 0.30, -0.40 }},
+    {{ 0.50, -0.60 }}, {{ 0.70, -0.80 }},
+    {{ 0.90, -1.00 }}, {{ 1.10, -1.20 }}
+  }};
+  const EelState state =
+    upper_task.makeState(0.25, half_pi, probe_velocities);
   if (!near(state[0], 0.5)) return 25;
   if (!near(state[1], 0.4)) return 26;
   if (!near(state[2], 1.1)) return 27;
   if (!near(state[3], 1.0)) return 28;
   if (!near(state[4], 0.0)) return 29;
+  for (std::size_t probe = 0; probe < EEL_PROBE_COUNT; ++probe)
+  {
+    if (!near(state[5 + 2 * probe],
+              probe_velocities[probe][0] / loaded.velocity_scale)) return 41;
+    if (!near(state[6 + 2 * probe],
+              probe_velocities[probe][1] / loaded.velocity_scale)) return 42;
+  }
+  if (state.size() != 17) return 43;
 
   // Catches reward sign, normalization, term separation, or wrong previous ratio.
   const RewardBreakdown reward = upper_task.reward(0.25, upper.previous_ratio);
@@ -149,8 +164,17 @@ int main(int argc, char** argv)
   EelControlTask perfect_task(loaded);
   const RewardBreakdown perfect = perfect_task.reward(0.2, 1.0);
   if (!near(perfect.total, 0.0)) return 34;
-  if (!throws<std::invalid_argument>([&] { perfect_task.makeState(nan, 0.0); })) return 35;
-  if (!throws<std::invalid_argument>([&] { perfect_task.makeState(0.0, inf); })) return 36;
+  if (!throws<std::invalid_argument>([&] {
+        perfect_task.makeState(nan, 0.0, probe_velocities);
+      })) return 35;
+  if (!throws<std::invalid_argument>([&] {
+        perfect_task.makeState(0.0, inf, probe_velocities);
+      })) return 36;
+  EelProbeVelocities invalid_probes = probe_velocities;
+  invalid_probes[4][1] = nan;
+  if (!throws<std::invalid_argument>([&] {
+        perfect_task.makeState(0.0, 0.0, invalid_probes);
+      })) return 44;
   if (!throws<std::invalid_argument>([&] { perfect_task.reward(nan, 1.0); })) return 37;
   if (!throws<std::invalid_argument>([&] { perfect_task.reward(0.0, inf); })) return 38;
 

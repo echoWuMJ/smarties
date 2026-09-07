@@ -1,5 +1,6 @@
 #include "CouplingDriver.h"
 #include "EelSmartiesAdapter.h"
+#include "EelVelocityProbes.h"
 
 #include <mpi.h>
 
@@ -58,7 +59,9 @@ int main(int argc, char** argv)
       report.completed_decisions >= report.completed_segments &&
       report.completed_ibamr_steps >= report.completed_decisions &&
       report.environment_initializations == 1 &&
-      report.finite_state_and_reward && report.state_dimension == 5 &&
+      report.finite_state_and_reward &&
+      report.state_dimension ==
+        ibamr_smarties::eel2d::EEL_CONTROL_STATE_DIMENSION &&
       report.action_dimension == 1 ? 1 : 0;
     int valid_count = 0;
     MPI_Allreduce(&local_valid, &valid_count, 1, MPI_INT, MPI_SUM,

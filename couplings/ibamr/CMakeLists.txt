@@ -10,6 +10,7 @@ add_library(ibamr_eel_control STATIC
   cases/eel2d/TailBeatPhase.cpp
   cases/eel2d/EelLayoutInvariant.cpp
   cases/eel2d/EelControlMeasurement.cpp
+  cases/eel2d/EelVelocityProbes.cpp
   cases/eel2d/EelControlTask.cpp
   cases/eel2d/EelLogicalSegments.cpp)
 target_include_directories(ibamr_eel_control PUBLIC

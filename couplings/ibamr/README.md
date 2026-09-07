@@ -5,8 +5,8 @@ Chinese setup and launch instructions: [README.zh-CN.md](README.zh-CN.md).
 This directory contains the executable coupling framework for the IBAMR 0.18.0
 `eel2d` example and Smarties. The original `smoke` mode remains a lifecycle
 probe. The experimental stage-two `train` mode applies one bounded Smarties
-action to the official eel tail-beat frequency, observes a five-component
-target-speed state, and advances multiple native IBAMR steps per decision.
+action to the official eel tail-beat frequency, observes a seventeen-component
+target-speed and local-flow state, and advances multiple native IBAMR steps per decision.
 
 Stage two supports one multi-decision physical episode. It does **not** yet
 reconstruct/reset IBAMR for independent episodes, establish policy quality,
@@ -132,7 +132,7 @@ configuration has been admitted.
 The launcher validates the task-file structure before building or launching
 MPI, copies the selected file to the run directory as `task.conf`, and passes
 only that frozen copy to the adapter. The run manifest records its SHA-256,
-the five-state/one-action dimensions, both training counters, selected budget
+the seventeen-state/one-action dimensions, both training counters, selected budget
 kind, simulation end time, executable path and hash, and
 `control_stage=stage2_physical_control_experimental`.
 

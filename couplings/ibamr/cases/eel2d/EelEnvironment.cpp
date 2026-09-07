@@ -11,6 +11,9 @@
 #include <BergerRigoutsos.h>
 #include <CartesianGridGeometry.h>
 #include <LoadBalancer.h>
+#include <HierarchyDataOpsManager.h>
+#include <HierarchyDataOpsReal.h>
+#include <SideVariable.h>
 #include <StandardTagAndInitialize.h>
 
 #include <ibamr/ConstraintIBMethod.h>
@@ -25,7 +28,9 @@
 #include <ibtk/AppInitializer.h>
 #include <ibtk/IBTKInit.h>
 #include <ibtk/IBTK_MPI.h>
+#include <ibtk/HierarchyGhostCellInterpolation.h>
 #include <ibtk/LData.h>
+#include <ibtk/interpolation_utilities.h>
 #include <ibtk/muParserCartGridFunction.h>
 #include <ibtk/muParserRobinBcCoefs.h>
 
@@ -46,6 +51,9 @@ namespace eel2d
 namespace
 {
 
+constexpr int EEL_PROBE_DATA_DEPTH = 1;
+constexpr int EEL_PROBE_GHOST_WIDTH = 3;
+
 void output_data(Pointer<PatchHierarchy<NDIM> > patch_hierarchy,
                  Pointer<INSHierarchyIntegrator> navier_stokes_integrator,
                  LDataManager* l_data_manager,
@@ -64,6 +72,8 @@ public:
   ControlIntervalResult advanceControlInterval(double nominal_duration);
   double currentTime() const;
   std::array<double, 2> currentCenterOfMass() const;
+  double currentBodyAxisAngle() const;
+  EelVelocityProbeSample sampleVelocityProbes();
   double currentTailBeatPhase() const;
   double currentTailBeatFrequencyRatio() const;
   std::size_t globalLagrangianPointCount() const;
@@ -102,6 +112,8 @@ private:
   Pointer<CartGridFunction> u_init_;
   Pointer<CartGridFunction> p_init_;
   Pointer<CartGridFunction> f_fcn_;
+  Pointer<Variable<NDIM> > u_var_;
+  Pointer<SideVariable<NDIM, double> > probe_u_var_;
   std::vector<RobinBcCoefStrategy<NDIM>*> u_bc_coefs_;
   Pointer<VisItDataWriter<NDIM> > visit_data_writer_;
   Pointer<LSiloDataWriter> silo_data_writer_;
@@ -122,6 +134,7 @@ private:
   int timer_dump_interval_ = 0;
 
   int u_idx_ = -1;
+  int probe_u_idx_ = -1;
   int p_idx_ = -1;
   int iteration_num_ = 0;
   int last_visualization_iteration_ = -1;
@@ -308,9 +321,16 @@ EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& i
     input_db_->printClassData(plog);
 
     VariableDatabase<NDIM>* var_db = VariableDatabase<NDIM>::getDatabase();
-    const Pointer<Variable<NDIM> > u_var = navier_stokes_integrator_->getVelocityVariable();
+    u_var_ = navier_stokes_integrator_->getVelocityVariable();
     const Pointer<VariableContext> u_ctx = navier_stokes_integrator_->getCurrentContext();
-    u_idx_ = var_db->mapVariableAndContextToIndex(u_var, u_ctx);
+    u_idx_ = var_db->mapVariableAndContextToIndex(u_var_, u_ctx);
+    probe_u_var_ =
+      new SideVariable<NDIM, double>("EelEnvironment::probe_velocity", 1);
+    const Pointer<VariableContext> probe_u_ctx =
+      var_db->getContext("EelEnvironment::probe_velocity_context");
+    probe_u_idx_ =
+      var_db->registerVariableAndContext(
+        probe_u_var_, probe_u_ctx, EEL_PROBE_GHOST_WIDTH);
     const Pointer<Variable<NDIM> > p_var = navier_stokes_integrator_->getPressureVariable();
     const Pointer<VariableContext> p_ctx = navier_stokes_integrator_->getCurrentContext();
     p_idx_ = var_db->mapVariableAndContextToIndex(p_var, p_ctx);
@@ -376,6 +396,87 @@ EelEnvironment::Impl::globalLagrangianPointCount() const
   if (!ready_ || ib_kinematics_op_.isNull())
     throw std::logic_error("EelEnvironment kinematics are not initialized");
   return ib_kinematics_op_->getGlobalLagrangianPointCount();
+}
+
+double
+EelEnvironment::Impl::currentBodyAxisAngle() const
+{
+  if (!ready_ || ib_kinematics_op_.isNull())
+    throw std::logic_error("EelEnvironment kinematics are not initialized");
+  return ib_kinematics_op_->getBodyAxisAngle();
+}
+
+EelVelocityProbeSample
+EelEnvironment::Impl::sampleVelocityProbes()
+{
+  if (!ready_ || patch_hierarchy_.isNull() || probe_u_var_.isNull() ||
+      u_idx_ < 0 || probe_u_idx_ < 0)
+    throw std::logic_error("EelEnvironment velocity field is not initialized");
+
+  EelVelocityProbeSample sample;
+  sample.positions =
+    makeEelProbePoints(currentCenterOfMass(), currentBodyAxisAngle());
+
+  using ITC =
+    IBTK::HierarchyGhostCellInterpolation::InterpolationTransactionComponent;
+  for (int level_number = 0;
+       level_number <= patch_hierarchy_->getFinestLevelNumber();
+       ++level_number)
+  {
+    Pointer<PatchLevel<NDIM> > level =
+      patch_hierarchy_->getPatchLevel(level_number);
+    if (!level->checkAllocated(probe_u_idx_))
+      level->allocatePatchData(probe_u_idx_, loop_time_);
+  }
+  HierarchyDataOpsManager<NDIM>* data_ops_manager =
+    HierarchyDataOpsManager<NDIM>::getManager();
+  Pointer<HierarchyDataOpsReal<NDIM, double> > probe_data_ops =
+    data_ops_manager->getOperationsDouble(probe_u_var_, patch_hierarchy_, true);
+  probe_data_ops->copyData(probe_u_idx_, u_idx_, true);
+
+  const std::vector<ITC> transactions = {{ ITC(
+    probe_u_idx_, u_idx_, "CONSERVATIVE_LINEAR_REFINE", true, "CUBIC_COARSEN",
+    "LINEAR", false, u_bc_coefs_) }};
+  Pointer<IBTK::HierarchyGhostCellInterpolation> ghost_fill =
+    new IBTK::HierarchyGhostCellInterpolation();
+  ghost_fill->initializeOperatorState(transactions, patch_hierarchy_);
+  ghost_fill->setHomogeneousBc(false);
+  ghost_fill->fillData(loop_time_);
+  ghost_fill->deallocateOperatorState();
+
+  std::vector<IBTK::VectorNd> locations(EEL_PROBE_COUNT);
+  for (std::size_t probe = 0; probe < EEL_PROBE_COUNT; ++probe)
+  {
+    locations[probe][0] = sample.positions[probe][0];
+    locations[probe][1] = sample.positions[probe][1];
+  }
+  std::vector<double> values;
+  values.reserve(EEL_PROBE_COUNT * EEL_PROBE_COMPONENT_COUNT);
+  for (const IBTK::VectorNd& location : locations)
+  {
+    const std::vector<double> probe_values =
+      IBTK::interpolate(location, probe_u_idx_, probe_u_var_,
+                        EEL_PROBE_DATA_DEPTH,
+                        patch_hierarchy_, "IB_4");
+    values.insert(values.end(), probe_values.begin(), probe_values.end());
+  }
+  if (values.size() != EEL_PROBE_COUNT * EEL_PROBE_COMPONENT_COUNT)
+    throw std::runtime_error("IBAMR returned an invalid eel probe velocity count");
+
+  for (std::size_t probe = 0; probe < EEL_PROBE_COUNT; ++probe)
+  {
+    for (std::size_t component = 0;
+         component < EEL_PROBE_COMPONENT_COUNT;
+         ++component)
+    {
+      const double value =
+        values[EEL_PROBE_COMPONENT_COUNT * probe + component];
+      if (!std::isfinite(value))
+        throw std::runtime_error("IBAMR returned a non-finite eel probe velocity");
+      sample.velocities[probe][component] = value;
+    }
+  }
+  return sample;
 }
 
 void
@@ -627,6 +728,18 @@ std::size_t
 EelEnvironment::globalLagrangianPointCount() const
 {
   return impl_->globalLagrangianPointCount();
+}
+
+double
+EelEnvironment::currentBodyAxisAngle() const
+{
+  return impl_->currentBodyAxisAngle();
+}
+
+EelVelocityProbeSample
+EelEnvironment::sampleVelocityProbes()
+{
+  return impl_->sampleVelocityProbes();
 }
 
 void

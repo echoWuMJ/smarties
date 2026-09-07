@@ -185,7 +185,7 @@ else
   else
     control_stage=stage2_policy_evaluation
   fi
-  state_dimension=5
+  state_dimension=17
 fi
 action_dimension=1
 

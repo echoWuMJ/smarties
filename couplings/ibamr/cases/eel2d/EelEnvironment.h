@@ -2,6 +2,7 @@
 #define IBAMR_SMARTIES_EEL_ENVIRONMENT_H
 
 #include "EelControlMeasurement.h"
+#include "EelVelocityProbes.h"
 
 #include <mpi.h>
 
@@ -30,6 +31,8 @@ public:
   ControlIntervalResult advanceControlInterval(double nominal_duration);
   double currentTime() const;
   std::array<double, 2> currentCenterOfMass() const;
+  double currentBodyAxisAngle() const;
+  EelVelocityProbeSample sampleVelocityProbes();
   double currentTailBeatPhase() const;
   double currentTailBeatFrequencyRatio() const;
   std::size_t globalLagrangianPointCount() const;
