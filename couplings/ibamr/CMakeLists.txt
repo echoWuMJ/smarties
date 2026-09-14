@@ -11,6 +11,7 @@ add_library(ibamr_eel_control STATIC
   cases/eel2d/EelLayoutInvariant.cpp
   cases/eel2d/EelControlMeasurement.cpp
   cases/eel2d/EelVelocityProbes.cpp
+  cases/eel2d/EelNearWallTask.cpp
   cases/eel2d/EelControlTask.cpp
   cases/eel2d/EelLogicalSegments.cpp)
 target_include_directories(ibamr_eel_control PUBLIC
@@ -55,6 +56,7 @@ if(BUILD_IBAMR_COUPLING)
     IBAMR::IBAMR2d)
 
   add_library(ibamr_eel2d_adapter STATIC
+    cases/eel2d/EelExternalAdapter.cpp
     cases/eel2d/EelSmartiesAdapter.cpp)
   target_include_directories(ibamr_eel2d_adapter PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/cases/eel2d)
@@ -74,6 +76,9 @@ if(BUILD_IBAMR_COUPLING)
   target_link_libraries(frequency_response_probe PRIVATE
     ibamr_coupling_core
     ibamr_eel2d_environment)
+
+  add_executable(eel_near_wall_episode cases/eel2d/EelNearWallAdapter.cpp)
+  target_link_libraries(eel_near_wall_episode PRIVATE ibamr_eel2d_environment)
 endif()
 
 if(BUILD_IBAMR_COUPLING_TESTS)

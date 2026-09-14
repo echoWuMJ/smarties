@@ -77,3 +77,6 @@ _deprecated*
 /.worktrees/
 /couplings/ibamr/build/
 /couplings/ibamr/runs/
+/tmp/
+__pycache__/
+*.pyc

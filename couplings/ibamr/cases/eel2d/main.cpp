@@ -16,6 +16,8 @@ int main(int argc, char** argv)
   }
 
   ibamr_smarties::CouplingDriver driver(argc, argv);
+  if (mode == ibamr_smarties::eel2d::EelMode::near_wall)
+    return driver.run(ibamr_smarties::eel2d::runNearWallEpisodes);
   if (mode == ibamr_smarties::eel2d::EelMode::speed_tracking)
     return driver.run(ibamr_smarties::eel2d::runSpeedTrackingEpisode);
   return driver.run(ibamr_smarties::eel2d::runSmokeEpisode);

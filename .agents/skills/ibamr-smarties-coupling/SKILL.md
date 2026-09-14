@@ -15,10 +15,10 @@ description: Use when designing, implementing, porting, installing, reviewing, d
 
 ## Fixed invariants
 
-- The coupling driver is the sole owner of `MPI_Init_thread()` and `MPI_Finalize()`.
+- Within each MPI job, its coupling driver is the sole owner of `MPI_Init_thread()` and `MPI_Finalize()`. The approved external-episode mode uses separate learner and CFD jobs, each with its own driver; a non-MPI supervisor launches them.
 - Smarties borrows a supplied communicator, duplicates what it needs, frees only its own communicators, and never finalizes MPI in borrowed mode.
 - Never `fork()` after MPI initialization. Allocate dedicated MPI ranks to learners and environment workers.
-- Only environment ranks initialize PETSc, SAMRAI, IBTK, and IBAMR. Set `PETSC_COMM_WORLD` to the environment communicator before PETSc/IBTK initialization.
+- Only CFD ranks initialize PETSc, SAMRAI, IBTK, and IBAMR. Set `PETSC_COMM_WORLD` to the CFD communicator before PETSc/IBTK initialization. External-mode Smarties proxy ranks do not initialize CFD libraries.
 - IBAMR owns the CFD time-stepping loop inside the environment worker. The adapter exchanges state, action, reward, terminal status, and reset commands only at explicit safe points.
 - A blocking `recvAction()` is the synchronization point: the environment waits without advancing IBAMR, then applies exactly one accepted action before advancing one complete control interval.
 - A logical Smarties training segment is not automatically an IBAMR reset. In a continuing case, preserve the existing environment, hierarchy, flow, geometry, time, and case-control state across `sendLastState()` / next `sendInitState()`; only perform a physical reset when that case explicitly defines one.

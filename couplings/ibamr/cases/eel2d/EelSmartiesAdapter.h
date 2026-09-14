@@ -16,10 +16,12 @@ namespace eel2d
 enum class EelMode
 {
   smoke,
+  near_wall,
   speed_tracking
 };
 
 EelMode parseEelMode(int argc, char** argv);
+void runNearWallEpisodes(smarties::Communicator*, MPI_Comm, int, char**);
 
 struct SmokeProtocolReport
 {

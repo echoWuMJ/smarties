@@ -26,6 +26,8 @@
 #include <ibamr/INSStaggeredPressureBcCoef.h>
 
 #include <ibtk/AppInitializer.h>
+#include <ibtk/CartCellDoubleCubicCoarsen.h>
+#include <ibtk/CartSideDoubleCubicCoarsen.h>
 #include <ibtk/IBTKInit.h>
 #include <ibtk/IBTK_MPI.h>
 #include <ibtk/HierarchyGhostCellInterpolation.h>
@@ -39,6 +41,8 @@
 #include "IBEELKinematics.h"
 
 #include <array>
+#include <fstream>
+#include <limits>
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
@@ -66,7 +70,10 @@ void output_data(Pointer<PatchHierarchy<NDIM> > patch_hierarchy,
 class EelEnvironment::Impl
 {
 public:
-  void initialize(MPI_Comm environment_comm, const std::string& input_file);
+  void initialize(MPI_Comm environment_comm, const std::string& input_file,
+                  const NearWallConfig* config = nullptr, double initial_height = 0);
+  NearWallObservation nearWallObservation() const;
+  double currentForceX() const;
   void advanceOneStep();
   void setTailBeatFrequencyRatio(double ratio);
   ControlIntervalResult advanceControlInterval(double nominal_duration);
@@ -143,10 +150,17 @@ private:
   double box_disp_ = 0.0;
   std::vector<std::vector<double> > structure_COM_;
   IBTK::Vector3d eel_COM_;
+  bool borrowed_runtime_ = false;
+  bool near_wall_ = false;
+  NearWallConfig near_wall_config_;
+  double initial_com_x_ = 0;
+  double last_angle_ = 0;
+  double angular_velocity_ = 0;
 };
 
 void
-EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& input_file)
+EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& input_file,
+                                const NearWallConfig* config, double initial_height)
 {
   if (ready_ || ibtk_init_) throw std::logic_error("EelEnvironment is already initialized");
   if (environment_comm == MPI_COMM_NULL)
@@ -165,7 +179,11 @@ EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& i
   argv_[1] = input_arg_.data();
   argv_[2] = nullptr;
 
-  ibtk_init_.reset(new IBTKInit(argc_, argv_.data(), environment_comm_));
+  borrowed_runtime_ = config != nullptr;
+  near_wall_ = config != nullptr;
+  if (config) { config->validate(); near_wall_config_ = *config; }
+  if (!borrowed_runtime_)
+    ibtk_init_.reset(new IBTKInit(argc_, argv_.data(), environment_comm_));
   // IBAMR 0.18's bundled SAMRAI startup resets its communicator to
   // SAMRAI_MPI::commWorld after IBTKInit first assigns the supplied subcomm.
   // Restore the environment communicator before AppInitializer broadcasts.
@@ -177,6 +195,36 @@ EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& i
   {
     app_initializer_ = new AppInitializer(argc_, argv_.data(), "IB.log");
     input_db_ = app_initializer_->getInputDatabase();
+    if (near_wall_)
+    {
+      // Translate the original vertex set, never resample its geometry.
+      std::ifstream vertices("eel2d.vertex");
+      std::size_t count = 0;
+      if (!(vertices >> count) || count == 0)
+        throw std::runtime_error("cannot read original eel2d.vertex");
+      double sum_y = 0, x, y;
+      for (std::size_t i = 0; i < count; ++i) {
+        if (!(vertices >> x >> y)) throw std::runtime_error("invalid eel2d.vertex");
+        sum_y += y;
+      }
+      const double shift[NDIM] = {0.0, config->wall_y + initial_height - sum_y/count};
+      input_db_->getDatabase("IBStandardInitializer")->putDoubleArray("posn_shift", shift, NDIM);
+      int periodic[NDIM] = {1, 0};
+      auto geometry = input_db_->getDatabase("CartesianGeometry");
+      geometry->putIntegerArray("periodic_dimension", periodic, NDIM);
+      double lower[NDIM];
+      geometry->getDoubleArray("x_lo", lower, NDIM);
+      if (std::abs(lower[1] - config->wall_y) > 1e-12)
+        throw std::runtime_error("near-wall wall_y must equal lower domain boundary");
+      // The CV must contain the fish without crossing the physical wall.
+      // Its lower face coincides with the physical wall; the control-volume
+      // surface integral must include the wall traction.
+      const double cv_lower[3] = {-1.0, config->wall_y, 0.0};
+      const double cv_upper[3] = {1.0, config->wall_y + 1.0, 0.0};
+      auto cv = input_db_->getDatabase("InitHydroForceBox_0");
+      cv->putDoubleArray("lower_left_corner", cv_lower, 3);
+      cv->putDoubleArray("upper_right_corner", cv_upper, 3);
+    }
 
     dump_viz_data_ = app_initializer_->dumpVizData();
     viz_dump_interval_ = app_initializer_->getVizDumpInterval();
@@ -213,6 +261,12 @@ EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& i
 
     grid_geometry_ = new CartesianGridGeometry<NDIM>(
       "CartesianGeometry", app_initializer_->getComponentDatabase("CartesianGeometry"));
+    if (near_wall_) {
+      // IBTK's IBTK_DO_ONCE registration belongs to the first geometry only.
+      // Every independent episode constructs a new geometry needing operators.
+      grid_geometry_->addSpatialCoarsenOperator(new IBTK::CartCellDoubleCubicCoarsen());
+      grid_geometry_->addSpatialCoarsenOperator(new IBTK::CartSideDoubleCubicCoarsen());
+    }
     patch_hierarchy_ = new PatchHierarchy<NDIM>("PatchHierarchy", grid_geometry_);
 
     error_detector_ = new StandardTagAndInitialize<NDIM>(
@@ -345,6 +399,10 @@ EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& i
 
     loop_time_end_ = time_integrator_->getEndTime();
     ready_ = true;
+    initial_com_x_ = eel_COM_[0];
+    last_angle_ = currentBodyAxisAngle();
+    if (near_wall_ && std::abs(eel_COM_[1] - config->wall_y - initial_height) > 1e-5)
+      throw std::runtime_error("near-wall initial COM shift was not applied");
   }
   catch (...)
   {
@@ -398,6 +456,50 @@ EelEnvironment::Impl::globalLagrangianPointCount() const
   return ib_kinematics_op_->getGlobalLagrangianPointCount();
 }
 
+double EelEnvironment::Impl::currentForceX() const
+{
+  if (!ready_) throw std::logic_error("EelEnvironment is not initialized");
+  return hydro_force_->getHydrodynamicForceObject(0).F_current[0];
+}
+
+NearWallObservation EelEnvironment::Impl::nearWallObservation() const
+{
+  if (!ready_ || !near_wall_) throw std::logic_error("near-wall environment is not initialized");
+  NearWallObservation o;
+  o.time = loop_time_;
+  o.height = eel_COM_[1] - near_wall_config_.wall_y;
+  o.progress = initial_com_x_ - eel_COM_[0];
+  const auto& velocity = ib_method_ops_->getCurrentCOMVelocity();
+  o.velocity = {{velocity[0][0], velocity[0][1]}};
+  o.body_angle = currentBodyAxisAngle();
+  o.angular_velocity = angular_velocity_;
+  o.phase = currentTailBeatPhase();
+  o.frequency_ratio = currentTailBeatFrequencyRatio();
+  double local_min[NDIM] = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
+  double local_max[NDIM] = {-std::numeric_limits<double>::max(), -std::numeric_limits<double>::max()};
+  auto* manager = ib_method_ops_->getLDataManager();
+  for (int ln=0; ln<=patch_hierarchy_->getFinestLevelNumber(); ++ln) {
+    if (!manager->levelContainsLagrangianData(ln)) continue;
+    Pointer<LData> data = manager->getLData("X", ln);
+    auto* X = data->getLocalFormVecArray();
+    for (unsigned i=0; i<data->getLocalNodeCount(); ++i)
+      for (int d=0; d<NDIM; ++d) {
+        local_min[d] = std::min(local_min[d], (*X)[i][d]);
+        local_max[d] = std::max(local_max[d], (*X)[i][d]);
+      }
+    data->restoreArrays();
+  }
+  double minimum[NDIM], maximum[NDIM];
+  MPI_Allreduce(local_min, minimum, NDIM, MPI_DOUBLE, MPI_MIN, environment_comm_);
+  MPI_Allreduce(local_max, maximum, NDIM, MPI_DOUBLE, MPI_MAX, environment_comm_);
+  o.minimum_gap = minimum[1] - near_wall_config_.wall_y;
+  const double* lo = grid_geometry_->getXLower();
+  const double* hi = grid_geometry_->getXUpper();
+  o.outside_safe_domain = minimum[0] <= lo[0]+1.0 || maximum[0] >= hi[0]-0.25 ||
+                         maximum[1] >= hi[1]-0.25;
+  return o;
+}
+
 double
 EelEnvironment::Impl::currentBodyAxisAngle() const
 {
@@ -416,6 +518,14 @@ EelEnvironment::Impl::sampleVelocityProbes()
   EelVelocityProbeSample sample;
   sample.positions =
     makeEelProbePoints(currentCenterOfMass(), currentBodyAxisAngle());
+  if (near_wall_)
+  {
+    const double* lower = grid_geometry_->getXLower();
+    const double* upper = grid_geometry_->getXUpper();
+    for (const auto& p : sample.positions)
+      if (p[0] <= lower[0] || p[0] >= upper[0] || p[1] <= lower[1] || p[1] >= upper[1])
+        throw std::runtime_error("near-wall velocity probe is outside the physical fluid domain");
+  }
 
   using ITC =
     IBTK::HierarchyGhostCellInterpolation::InterpolationTransactionComponent;
@@ -604,6 +714,12 @@ EelEnvironment::Impl::advanceOneStep()
   for (int d = 0; d < 3; ++d) eel_COM_[d] = structure_COM_[0][d];
   hydro_force_->setTorqueOrigin(eel_COM_, 0);
 
+  if (near_wall_) {
+    const double angle = currentBodyAxisAngle();
+    angular_velocity_ = std::atan2(std::sin(angle-last_angle_), std::cos(angle-last_angle_))/dt;
+    last_angle_ = angle;
+  }
+
   iteration_num_ += 1;
   const bool last_step = !time_integrator_->stepsRemaining();
   if (dump_viz_data_ && uses_visit_ &&
@@ -668,6 +784,9 @@ EelEnvironment::Impl::shutdown()
   input_db_.setNull();
   app_initializer_.setNull();
 
+  u_var_.setNull();
+  probe_u_var_.setNull();
+
   ibtk_init_.reset();
   environment_comm_ = MPI_COMM_NULL;
 }
@@ -729,6 +848,18 @@ EelEnvironment::globalLagrangianPointCount() const
 {
   return impl_->globalLagrangianPointCount();
 }
+
+void EelEnvironment::initializeNearWall(MPI_Comm communicator, const std::string& input,
+                                       const NearWallConfig& config, double height)
+{
+  impl_->initialize(communicator, input, &config, height);
+}
+
+NearWallObservation EelEnvironment::nearWallObservation() const
+{ return impl_->nearWallObservation(); }
+
+double EelEnvironment::currentForceX() const
+{ return impl_->currentForceX(); }
 
 double
 EelEnvironment::currentBodyAxisAngle() const

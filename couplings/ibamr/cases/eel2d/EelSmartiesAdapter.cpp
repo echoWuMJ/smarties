@@ -222,10 +222,11 @@ EelMode parseEelMode(const int argc, char** const argv)
       throw std::invalid_argument("missing value after --eel-mode");
     const std::string value(argv[i]);
     if (value == "smoke") mode = EelMode::smoke;
+    else if (value == "near-wall") mode = EelMode::near_wall;
     else if (value == "speed-tracking") mode = EelMode::speed_tracking;
     else
       throw std::invalid_argument(
-        "--eel-mode must be smoke or speed-tracking");
+        "--eel-mode must be smoke, speed-tracking or near-wall");
     found_mode = true;
   }
   return mode;

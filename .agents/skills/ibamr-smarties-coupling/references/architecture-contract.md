@@ -4,14 +4,18 @@ This contract applies to every IBAMR-Smarties case. It defines ownership and lif
 
 ## Process and ownership
 
-Run one MPI job with a long-lived coupling driver. The driver calls `MPI_Init_thread()` exactly once, splits `MPI_COMM_WORLD`, and calls `MPI_Finalize()` exactly once after every owned object is destroyed.
+For the existing in-process coupling, run one MPI job with a long-lived coupling driver. The driver calls `MPI_Init_thread()` exactly once, splits `MPI_COMM_WORLD`, and calls `MPI_Finalize()` exactly once after every owned object is destroyed.
+
+For the user-approved external-episode mode, a non-MPI supervisor starts one persistent Smarties job and one independent CFD job per active environment. Every CFD job runs exactly one physical episode and owns its own MPI lifecycle. The persistent Smarties job contains learner and proxy ranks only. Proxies forward observations/actions; they never initialize PETSc/IBTK or launch subprocesses. Wait for the old CFD job to exit and be reaped before replacing it. A new episode resets CFD, not network, optimizer or replay. Keep normal terminal, truncation, solver failure and training cancellation distinct.
+
+Current external implementation is single-host, same-user, private-directory small-message exchange. It does not establish cross-node support. Do not replace this with nested shell launches from initialized MPI ranks. See `couplings/ibamr/NEAR_WALL.zh-CN.md` for entrypoints and output layout.
 
 Split ranks into:
 
 - learner ranks, which run Smarties learning and do not initialize the CFD stack;
 - one environment communicator per IBAMR simulation, containing only that simulation's ranks.
 
-Use dedicated MPI ranks for environments (`workerProcessesPerEnv >= 1`). Learner and environment ranks are disjoint. Do not fork after MPI initialization. Every library below the driver borrows MPI.
+Use dedicated MPI ranks for environments (`workerProcessesPerEnv >= 1`). Learner and environment ranks are disjoint. External mode uses one proxy rank per environment, with CFD ranks in separate jobs. Do not fork after MPI initialization. Every library below its job's driver borrows MPI.
 
 ## Communicator ownership
 

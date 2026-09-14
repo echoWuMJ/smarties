@@ -78,6 +78,10 @@ target_include_directories(eel_velocity_probes_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d)
 target_link_libraries(eel_velocity_probes_test PRIVATE ibamr_eel_control)
 
+add_executable(eel_near_wall_task_test test_eel_near_wall_task.cpp)
+target_link_libraries(eel_near_wall_task_test PRIVATE ibamr_eel_control)
+add_test(NAME eel_near_wall_task COMMAND eel_near_wall_task_test)
+
 add_executable(eel_control_measurement_test test_eel_control_measurement.cpp)
 target_include_directories(eel_control_measurement_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d)

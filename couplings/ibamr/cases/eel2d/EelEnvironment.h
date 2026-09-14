@@ -3,6 +3,7 @@
 
 #include "EelControlMeasurement.h"
 #include "EelVelocityProbes.h"
+#include "EelNearWallTask.h"
 
 #include <mpi.h>
 
@@ -26,6 +27,11 @@ public:
   EelEnvironment& operator=(const EelEnvironment&) = delete;
 
   void initialize(MPI_Comm environment_comm, const std::string& input_file);
+  // Caller keeps one IBTKInit alive across all independent physical episodes.
+  void initializeNearWall(MPI_Comm environment_comm, const std::string& input_file,
+                          const NearWallConfig& config, double initial_height);
+  NearWallObservation nearWallObservation() const;
+  double currentForceX() const;
   void advanceOneStep();
   void setTailBeatFrequencyRatio(double ratio);
   ControlIntervalResult advanceControlInterval(double nominal_duration);
