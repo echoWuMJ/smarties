@@ -125,7 +125,12 @@ class CheckpointStore:
             or not stat.S_ISDIR(staging.lstat().st_mode)
         ):
             raise ValueError("invalid staging directory")
-        if (staging / _MANIFEST).exists():
+        descriptor = staging / _MANIFEST
+        try:
+            descriptor.lstat()
+        except FileNotFoundError:
+            pass
+        else:
             raise ValueError("staging directory already has a descriptor")
 
     def _ensure_storage_root(self) -> None:
@@ -177,6 +182,12 @@ class CheckpointStore:
 
     def _validate_snapshot(self, snapshot: Path) -> None:
         descriptor = snapshot / _MANIFEST
+        try:
+            descriptor_mode = descriptor.lstat().st_mode
+        except OSError as error:
+            raise ValueError(f"invalid checkpoint descriptor: {snapshot}") from error
+        if not stat.S_ISREG(descriptor_mode):
+            raise ValueError(f"checkpoint descriptor is not a regular file: {snapshot}")
         try:
             manifest = json.loads(descriptor.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError) as error:

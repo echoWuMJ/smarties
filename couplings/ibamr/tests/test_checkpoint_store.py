@@ -157,6 +157,53 @@ class CheckpointStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.publish(staging, {}, ["state"])
 
+    @unittest.skipIf(os.name == "nt", "symlink semantics are POSIX-specific")
+    def test_select_rejects_a_symlinked_descriptor(self):
+        saved = self.publish()
+        descriptor = saved / "manifest.json"
+        external = self.run / "external-manifest.json"
+        descriptor.replace(external)
+        descriptor.symlink_to(external)
+
+        with self.assertRaises(ValueError):
+            self.store.select()
+
+    @unittest.skipIf(os.name == "nt", "FIFO semantics are POSIX-specific")
+    def test_prune_rejects_a_fifo_descriptor_without_blocking(self):
+        saved = self.publish()
+        descriptor = saved / "manifest.json"
+        descriptor.unlink()
+        os.mkfifo(descriptor)
+        program = (
+            "import sys; sys.path.insert(0, sys.argv[2]); "
+            "from checkpoint_store import CheckpointStore; "
+            "store=CheckpointStore(sys.argv[1]); "
+            "\ntry: store.prune()\nexcept ValueError: raise SystemExit(0)\n"
+            "raise SystemExit(3)"
+        )
+        process = subprocess.Popen(
+            [sys.executable, "-c", program, str(self.run), str(SCRIPTS)]
+        )
+        try:
+            self.assertEqual(0, process.wait(timeout=2))
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
+
+    @unittest.skipIf(os.name == "nt", "symlink semantics are POSIX-specific")
+    def test_publish_rejects_descriptor_symlink_without_overwriting_target(self):
+        staging = self.store.begin()
+        (staging / "state").write_bytes(b"state")
+        external = self.run / "external-manifest.json"
+        external.write_bytes(b"preserve me")
+        (staging / "manifest.json").symlink_to(external)
+
+        with self.assertRaises(ValueError):
+            self.store.publish(staging, {}, ["state"])
+
+        self.assertEqual(b"preserve me", external.read_bytes())
+
 
 @unittest.skipIf(os.name == "nt", "flock is POSIX-specific")
 class RunLockTests(unittest.TestCase):
