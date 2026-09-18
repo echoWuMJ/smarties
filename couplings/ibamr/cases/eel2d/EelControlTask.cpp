@@ -242,5 +242,20 @@ EelControlTask::clippedActionCount() const
   return clipped_action_count_;
 }
 
+EelControlHistory EelControlTask::saveState() const
+{
+  return {applied_ratio_, clipped_action_count_};
+}
+
+void EelControlTask::restoreState(const EelControlHistory& state)
+{
+  if (!std::isfinite(state.applied_ratio) ||
+      state.applied_ratio < config_.minimum_frequency_ratio ||
+      state.applied_ratio > config_.maximum_frequency_ratio)
+    throw std::invalid_argument("invalid control restart frequency ratio");
+  applied_ratio_ = state.applied_ratio;
+  clipped_action_count_ = state.clipped_action_count;
+}
+
 } // namespace eel2d
 } // namespace ibamr_smarties

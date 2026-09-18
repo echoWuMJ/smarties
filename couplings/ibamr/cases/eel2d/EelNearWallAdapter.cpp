@@ -3,6 +3,7 @@
 #include "EelNearWallTask.h"
 #include "EelControlTask.h"
 #include "EpisodeMailbox.h"
+#include "PairedEpisodeState.h"
 #include "MpiSession.h"
 #include <ibtk/IBTKInit.h>
 #include <tbox/SAMRAI_MPI.h>
@@ -95,6 +96,15 @@ void runStandaloneEpisode(FileEpisodeChannel* comm, MPI_Comm env_comm,
     char cwd[4096];
     if (!getcwd(cwd,sizeof(cwd))) throw std::runtime_error("getcwd failed");
     const std::string root=cwd;
+    const char* restore_env=std::getenv("EEL_CFD_RESTORE");
+    const std::string restore=restore_env?restore_env:"";
+    CfdRestart saved;
+    if (!restore.empty()) {
+      saved=parseCfdRestart(readFile(restore+"/adapter.state"));
+      if (saved.height<config.initial_height_min*config.length ||
+          saved.height>config.initial_height_max*config.length)
+        throw std::runtime_error("saved initial height incompatible with task");
+    }
     const std::string original_input=readFile(input);
     const std::string vertices=readFile("eel2d.vertex");
     int root_world_rank=world_rank;
@@ -113,6 +123,7 @@ void runStandaloneEpisode(FileEpisodeChannel* comm, MPI_Comm env_comm,
       ++episode;
       double height=rank==0?heights(rng):0;
       MPI_Bcast(&height,1,MPI_DOUBLE,0,env_comm);
+      if (!restore.empty()) { height=saved.height; decisions=saved.decisions; }
       std::ostringstream name;
       name << root << "/cfd";
       const std::string directory=name.str();
@@ -139,9 +150,14 @@ void runStandaloneEpisode(FileEpisodeChannel* comm, MPI_Comm env_comm,
         EelEnvironment environment;
         AbortDuringUnwind abort_before_environment_destructor{env_comm};
         EelControlTask control(action_config);
-        environment.initializeNearWall(env_comm,"input2d",config,height);
+        environment.initializeNearWall(env_comm,"input2d",config,height,restore);
+        if (!restore.empty()) {
+          control.restoreState(saved.control);
+          comm->restoreSequence(saved.sequence);
+        }
         NearWallObservation o=environment.nearWallObservation();
         auto probes=environment.sampleVelocityProbes();
+        if (!restore.empty()) probes=saved.probes;
         o.fluid_velocity=probes.velocities;
         NearWallState state=makeNearWallState(o,config);
         std::ofstream trace;
@@ -155,7 +171,23 @@ void runStandaloneEpisode(FileEpisodeChannel* comm, MPI_Comm env_comm,
                       episode,o.time,o.height,environment.globalLagrangianPointCount(),directory.c_str());
           std::fflush(stdout);
         }
-        comm->sendInitState(vectorState(state));
+        comm->setCheckpointHandler([&](const std::string& destination) {
+          environment.writeRestart(destination);
+          int written=1;
+          if (!rank) {
+            try {
+              CfdRestart checkpoint;
+              checkpoint.height=height; checkpoint.decisions=decisions;
+              checkpoint.sequence=comm->sequence(); checkpoint.control=control.saveState();
+              checkpoint.probes=probes;
+              writeFile(destination+"/adapter.state",serializeCfdRestart(checkpoint)+"\n");
+            } catch (...) { written=0; }
+          }
+          MPI_Bcast(&written,1,MPI_INT,0,env_comm);
+          if (!written) throw std::runtime_error("cannot save CFD adapter state");
+        });
+        if (restore.empty()) comm->sendInitState(vectorState(state));
+        else if (!rank) publish(root+"/resume.ready",restore);
         NearWallEnd end=NearWallEnd::running;
         while (!comm->terminateTraining() && end==NearWallEnd::running) {
           auto action=comm->recvAction();

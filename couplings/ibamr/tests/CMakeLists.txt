@@ -59,6 +59,23 @@ target_link_libraries(distributed_environment_shutdown PRIVATE
   MPI::MPI_CXX)
 
 add_executable(tail_beat_phase_test test_tail_beat_phase.cpp)
+
+add_executable(eel_control_restart_test test_eel_control_restart.cpp)
+target_link_libraries(eel_control_restart_test PRIVATE ibamr_eel_control)
+add_test(NAME eel_control_restart COMMAND eel_control_restart_test)
+
+add_executable(paired_episode_state_test test_paired_episode_state.cpp)
+target_link_libraries(paired_episode_state_test PRIVATE ibamr_eel_control)
+add_test(NAME paired_episode_state COMMAND paired_episode_state_test)
+
+add_executable(episode_checkpoint_test test_episode_checkpoint.cpp)
+target_include_directories(episode_checkpoint_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d)
+target_link_libraries(episode_checkpoint_test PRIVATE MPI::MPI_CXX)
+
+if(BUILD_IBAMR_COUPLING)
+  add_executable(eel_cfd_restart_probe eel_cfd_restart_probe.cpp)
+  target_link_libraries(eel_cfd_restart_probe PRIVATE ibamr_eel2d_environment)
+endif()
 target_include_directories(tail_beat_phase_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../cases/eel2d)
 target_link_libraries(tail_beat_phase_test PRIVATE ibamr_eel_control)

@@ -2,6 +2,7 @@
 // IBAMR is distributed under the 3-clause BSD license.
 
 #include "EelEnvironment.h"
+#include "RegridSafeINSStaggeredHierarchyIntegrator.h"
 
 #include <SAMRAI_config.h>
 #include <petscsys.h>
@@ -42,6 +43,7 @@
 
 #include <array>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <cmath>
 #include <cstdio>
@@ -71,7 +73,9 @@ class EelEnvironment::Impl
 {
 public:
   void initialize(MPI_Comm environment_comm, const std::string& input_file,
-                  const NearWallConfig* config = nullptr, double initial_height = 0);
+                  const NearWallConfig* config = nullptr, double initial_height = 0,
+                  const std::string& restart_directory = "");
+  void writeRestart(const std::string& directory);
   NearWallObservation nearWallObservation() const;
   double currentForceX() const;
   void advanceOneStep();
@@ -100,7 +104,8 @@ private:
   int argc_ = 2;
   std::vector<char> executable_arg_;
   std::vector<char> input_arg_;
-  std::array<char*, 3> argv_{{nullptr, nullptr, nullptr}};
+  std::vector<char> restart_arg_, restart_step_arg_;
+  std::array<char*, 5> argv_{{nullptr, nullptr, nullptr, nullptr, nullptr}};
   std::unique_ptr<IBTKInit> ibtk_init_;
 
   Pointer<AppInitializer> app_initializer_;
@@ -160,7 +165,8 @@ private:
 
 void
 EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& input_file,
-                                const NearWallConfig* config, double initial_height)
+                                const NearWallConfig* config, double initial_height,
+                                const std::string& restart_directory)
 {
   if (ready_ || ibtk_init_) throw std::logic_error("EelEnvironment is already initialized");
   if (environment_comm == MPI_COMM_NULL)
@@ -178,6 +184,29 @@ EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& i
   argv_[0] = executable_arg_.data();
   argv_[1] = input_arg_.data();
   argv_[2] = nullptr;
+
+  const bool restarting = !restart_directory.empty();
+  double saved_time = 0, saved_origin = 0, saved_angle = 0, saved_angular_velocity = 0, saved_box_disp = 0;
+  int saved_step = 0;
+  if (restarting) {
+    if (!config) throw std::invalid_argument("paired CFD restart requires near-wall configuration");
+    std::ifstream state(restart_directory + "/environment.state");
+    int version = 0;
+    if (!(state >> version >> saved_step >> saved_time >> saved_origin >> saved_angle
+                >> saved_angular_velocity >> saved_box_disp) || version != 1 || saved_step < 0)
+      throw std::runtime_error("invalid CFD checkpoint sidecar");
+    std::string extra;
+    if (state >> extra) throw std::runtime_error("extra CFD checkpoint sidecar fields");
+    for (double value : {saved_time, saved_origin, saved_angle, saved_angular_velocity, saved_box_disp})
+      if (!std::isfinite(value)) throw std::runtime_error("non-finite CFD checkpoint state");
+    if (saved_time < 0) throw std::runtime_error("negative CFD checkpoint time");
+    const std::string native_directory = restart_directory + "/samrai";
+    const std::string step_string = std::to_string(saved_step);
+    restart_arg_.assign(native_directory.begin(), native_directory.end()); restart_arg_.push_back('\0');
+    restart_step_arg_.assign(step_string.begin(), step_string.end()); restart_step_arg_.push_back('\0');
+    argc_ = 4;
+    argv_[2] = restart_arg_.data(); argv_[3] = restart_step_arg_.data(); argv_[4] = nullptr;
+  }
 
   borrowed_runtime_ = config != nullptr;
   near_wall_ = config != nullptr;
@@ -244,7 +273,7 @@ EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& i
     dump_timer_data_ = app_initializer_->dumpTimerData();
     timer_dump_interval_ = app_initializer_->getTimerDumpInterval();
 
-    navier_stokes_integrator_ = new INSStaggeredHierarchyIntegrator(
+    navier_stokes_integrator_ = new RegridSafeINSStaggeredHierarchyIntegrator(
       "INSStaggeredHierarchyIntegrator",
       app_initializer_->getComponentDatabase("INSStaggeredHierarchyIntegrator"));
 
@@ -362,6 +391,26 @@ EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& i
       ->getDoubleArray("init_velocity", &box_init_vel[0], 3);
     hydro_force_->registerStructure(box_X_lower, box_X_upper, patch_hierarchy_, box_init_vel, 0);
 
+    if (restarting) {
+      // IBAMR 0.18's calculateStructure{,Rotational}Momentum accumulates into
+      // these vectors, but ConstraintIBMethod's restart does not save them.
+      // The force evaluator DOES save the identical values as P/L_current.
+      // Preserve the continuous-run history, without changing its numerics.
+      // The views refer to mutable members of our non-const, owned object;
+      // 0.18 exposes getters but no setter for restoring this missing history.
+      using Momentum = std::vector<std::vector<double>>;
+      auto& momentum = const_cast<Momentum&>(ib_method_ops_->getStructureMomentum());
+      auto& angular_momentum = const_cast<Momentum&>(ib_method_ops_->getStructureRotationalMomentum());
+      if (momentum.size() != 1 || angular_momentum.size() != 1 ||
+          momentum[0].size() != 3 || angular_momentum[0].size() != 3)
+        throw std::runtime_error("unsupported ConstraintIB restart momentum layout");
+      const auto& saved_force = hydro_force_->getHydrodynamicForceObject(0);
+      for (int d = 0; d < 3; ++d) {
+        momentum[0][d] = saved_force.P_current[d];
+        angular_momentum[0][d] = saved_force.L_current[d];
+      }
+    }
+
     structure_COM_ = ib_method_ops_->getCurrentStructureCOM();
     for (int d = 0; d < 3; ++d) eel_COM_[d] = structure_COM_[0][d];
     hydro_force_->setTorqueOrigin(eel_COM_, 0);
@@ -401,7 +450,15 @@ EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& i
     ready_ = true;
     initial_com_x_ = eel_COM_[0];
     last_angle_ = currentBodyAxisAngle();
-    if (near_wall_ && std::abs(eel_COM_[1] - config->wall_y - initial_height) > 1e-5)
+    if (restarting) {
+      if (iteration_num_ != saved_step || loop_time_ != saved_time)
+        throw std::runtime_error("CFD native restart and case sidecar do not match");
+      initial_com_x_ = saved_origin;
+      last_angle_ = saved_angle;
+      angular_velocity_ = saved_angular_velocity;
+      box_disp_ = saved_box_disp;
+    }
+    if (near_wall_ && !restarting && std::abs(eel_COM_[1] - config->wall_y - initial_height) > 1e-5)
       throw std::runtime_error("near-wall initial COM shift was not applied");
   }
   catch (...)
@@ -409,6 +466,27 @@ EelEnvironment::Impl::initialize(MPI_Comm environment_comm, const std::string& i
     shutdown();
     throw;
   }
+}
+
+void EelEnvironment::Impl::writeRestart(const std::string& directory)
+{
+  if (!ready_ || !near_wall_ || directory.empty())
+    throw std::logic_error("CFD restart requires a ready near-wall environment and destination");
+  // Library objects own the hierarchy, structure, flow and force history.
+  // These scalar case fields are not registered library restart objects.
+  RestartManager::getManager()->writeRestartFile(directory + "/samrai", iteration_num_);
+  int rank = 0;
+  MPI_Comm_rank(environment_comm_, &rank);
+  int written = 1;
+  if (rank == 0) {
+    std::ofstream state(directory + "/environment.state");
+    state << std::setprecision(17) << 1 << ' ' << iteration_num_ << ' ' << loop_time_ << ' '
+          << initial_com_x_ << ' ' << last_angle_ << ' ' << angular_velocity_ << ' ' << box_disp_ << '\n';
+    state.close();
+    written = bool(state);
+  }
+  MPI_Bcast(&written, 1, MPI_INT, 0, environment_comm_);
+  if (!written) throw std::runtime_error("cannot write CFD checkpoint sidecar");
 }
 
 bool
@@ -850,10 +928,14 @@ EelEnvironment::globalLagrangianPointCount() const
 }
 
 void EelEnvironment::initializeNearWall(MPI_Comm communicator, const std::string& input,
-                                       const NearWallConfig& config, double height)
+                                       const NearWallConfig& config, double height,
+                                       const std::string& restart_directory)
 {
-  impl_->initialize(communicator, input, &config, height);
+  impl_->initialize(communicator, input, &config, height, restart_directory);
 }
+
+void EelEnvironment::writeRestart(const std::string& directory)
+{ impl_->writeRestart(directory); }
 
 NearWallObservation EelEnvironment::nearWallObservation() const
 { return impl_->nearWallObservation(); }

@@ -64,5 +64,22 @@ TailBeatPhase::baselineAngularFrequency() const
   return omega0_;
 }
 
+std::array<double, 4> TailBeatPhase::saveState() const
+{
+  return {{omega0_, anchor_time_, anchor_phase_, ratio_}};
+}
+
+void TailBeatPhase::restoreState(const std::array<double, 4>& state)
+{
+  for (double value : state)
+    if (!std::isfinite(value)) throw std::invalid_argument("non-finite phase restart state");
+  if (state[0] != omega0_ || state[1] < 0 || state[3] <= 0 ||
+      !std::isfinite(state[0] * state[3]))
+    throw std::invalid_argument("incompatible phase restart state");
+  anchor_time_ = state[1];
+  anchor_phase_ = state[2];
+  ratio_ = state[3];
+}
+
 } // namespace eel2d
 } // namespace ibamr_smarties

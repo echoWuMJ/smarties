@@ -183,6 +183,9 @@ IBEELKinematics::putToDatabase(Pointer<Database> db)
     db->putDoubleArray("d_incremented_angle_from_reference_axis", &d_incremented_angle_from_reference_axis[0], 3);
     db->putDoubleArray("d_tagged_pt_position", &d_tagged_pt_position[0], 3);
 
+    const auto phase = d_tail_beat_phase.saveState();
+    db->putDoubleArray("coupling_tail_beat_phase", phase.data(), phase.size());
+
     return;
 
 } // putToDatabase
@@ -206,6 +209,14 @@ IBEELKinematics::getFromRestart()
     db->getDoubleArray("d_center_of_mass", &d_center_of_mass[0], 3);
     db->getDoubleArray("d_incremented_angle_from_reference_axis", &d_incremented_angle_from_reference_axis[0], 3);
     db->getDoubleArray("d_tagged_pt_position", &d_tagged_pt_position[0], 3);
+
+    // Old fixed-frequency dumps cannot reconstruct a controlled phase history.
+    // Refuse them instead of silently resetting the swimming motion.
+    if (!db->keyExists("coupling_tail_beat_phase"))
+        TBOX_ERROR("controlled eel restart is missing tail-beat phase history\n");
+    std::array<double, 4> phase;
+    db->getDoubleArray("coupling_tail_beat_phase", phase.data(), phase.size());
+    d_tail_beat_phase.restoreState(phase);
 
     return;
 } // getFromRestart

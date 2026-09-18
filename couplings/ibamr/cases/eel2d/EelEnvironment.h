@@ -29,7 +29,10 @@ public:
   void initialize(MPI_Comm environment_comm, const std::string& input_file);
   // Caller keeps one IBTKInit alive across all independent physical episodes.
   void initializeNearWall(MPI_Comm environment_comm, const std::string& input_file,
-                          const NearWallConfig& config, double initial_height);
+                          const NearWallConfig& config, double initial_height,
+                          const std::string& restart_directory = "");
+  // Collective; caller owns a new, unpublished checkpoint directory.
+  void writeRestart(const std::string& directory);
   NearWallObservation nearWallObservation() const;
   double currentForceX() const;
   void advanceOneStep();

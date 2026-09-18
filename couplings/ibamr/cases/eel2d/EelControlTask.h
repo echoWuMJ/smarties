@@ -50,6 +50,12 @@ struct RewardBreakdown
   double total;
 };
 
+struct EelControlHistory
+{
+  double applied_ratio;
+  unsigned clipped_action_count;
+};
+
 class EelControlTask
 {
 public:
@@ -62,6 +68,8 @@ public:
   RewardBreakdown reward(double forward_velocity, double previous_ratio) const;
   double controlInterval() const;
   unsigned clippedActionCount() const;
+  EelControlHistory saveState() const;
+  void restoreState(const EelControlHistory& state);
 
 private:
   EelTaskConfig config_;
