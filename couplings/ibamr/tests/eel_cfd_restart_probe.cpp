@@ -32,7 +32,10 @@ int main(int argc, char** argv) {
     const auto before=env.nearWallObservation();
     const double force_before=env.currentForceX();
     env.setTailBeatFrequencyRatio(0.9);
-    env.advanceOneStep(); env.advanceOneStep();
+    const double continuation_start=env.currentTime();
+    while (env.stepsRemaining() &&
+           env.currentTime()-continuation_start<config.controlInterval())
+      env.advanceOneStep();
     const auto after=env.nearWallObservation();
     const auto probes=env.sampleVelocityProbes();
     // Keep native end states for diagnosing a failed force comparison.

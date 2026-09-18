@@ -3,11 +3,25 @@
 #include "EelVelocityProbes.h"
 #include <cmath>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 
 namespace ibamr_smarties { namespace eel2d {
+inline bool parseUnsignedField(std::istream& in, unsigned& value) {
+  std::string token;
+  if (!(in>>token) || token.empty() || token.front()=='-') return false;
+  try {
+    std::size_t used=0;
+    const auto parsed=std::stoull(token,&used);
+    if (used!=token.size() || parsed>std::numeric_limits<unsigned>::max()) return false;
+    value=static_cast<unsigned>(parsed);
+    return true;
+  } catch (const std::exception&) {
+    return false;
+  }
+}
 // A: feedback consumed by learner, action selected but not yet sent to CFD.
 // N: no live CFD; episode is the number to start next, not one to replay.
 struct ProxyRestart {
@@ -17,7 +31,8 @@ struct ProxyRestart {
 };
 inline ProxyRestart parseProxyRestart(const std::string& text) {
   std::istringstream in(text); unsigned version=0; ProxyRestart state; std::string extra;
-  if (!(in>>version>>state.episode>>state.sequence>>state.kind>>state.action) ||
+  if (!parseUnsignedField(in,version) || !parseUnsignedField(in,state.episode) ||
+      !parseUnsignedField(in,state.sequence) || !(in>>state.kind>>state.action) ||
       version!=1 || !state.episode || !std::isfinite(state.action) ||
       state.action < -1 || state.action > 1 ||
       (state.kind!='A' && state.kind!='N') ||
@@ -38,8 +53,10 @@ struct CfdRestart {
 };
 inline CfdRestart parseCfdRestart(const std::string& text) {
   std::istringstream in(text); unsigned version=0; CfdRestart state; std::string extra;
-  if (!(in>>version>>state.height>>state.decisions>>state.sequence
-        >>state.control.applied_ratio>>state.control.clipped_action_count) ||
+  if (!parseUnsignedField(in,version) || !(in>>state.height) ||
+      !parseUnsignedField(in,state.decisions) || !parseUnsignedField(in,state.sequence) ||
+      !(in>>state.control.applied_ratio) ||
+      !parseUnsignedField(in,state.control.clipped_action_count) ||
       version!=1 || !std::isfinite(state.height) || state.height<=0 ||
       !state.sequence || state.sequence-1!=state.decisions ||
       !std::isfinite(state.control.applied_ratio) || state.control.applied_ratio<=0)

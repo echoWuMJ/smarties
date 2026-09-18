@@ -1,4 +1,4 @@
-"""Compare four continuous CFD steps with two steps + native restart + two.
+"""Compare continuous CFD with a two-step checkpoint and full control interval.
 
 This only verifies CFD/case state, not learner state or paired-run recovery.
 """
