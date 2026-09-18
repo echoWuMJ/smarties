@@ -154,10 +154,26 @@ void Worker::runTraining()
   //////////////////////////////////////////////////////////////////////////////
   /////////////////////////////// TRAINING LOOP ////////////////////////////////
   //////////////////////////////////////////////////////////////////////////////
+  bool pairedBudgetReached=false;
   while(1) {
+    if(pairedMode && !pairedBudgetReached && isOver()) {
+      // A proxy may already be parked while another delivers the transition
+      // crossing the cumulative budget. Legacy shutdown waits for another
+      // feedback from every proxy and deadlocks against that parked owner.
+      // Let the supervisor park ALL owners and perform the normal paired-stop
+      // handshake. Keep updates and action handlers servicing in-flight work
+      // until then (freezing updates here could itself block data acquisition).
+      const std::string path=pairedControl+"/learner.budget_reached", tmp=path+".tmp";
+      std::ofstream out(tmp); out << "reached\n"; out.flush();
+      if(!out) throw std::runtime_error("failed to write learner.budget_reached");
+      out.close();
+      if(!out || std::rename(tmp.c_str(),path.c_str())!=0)
+        throw std::runtime_error("failed to publish learner.budget_reached");
+      pairedBudgetReached=true;
+    }
     if(pairedMode && servicePairedCheckpoint()) break;
     algoTasks.run();
-    if ( isOver() ) break;
+    if ( !pairedMode && isOver() ) break;
   }
 
   // kill data gathering process
@@ -172,6 +188,8 @@ void Worker::initializePairedTraining()
   const char* restore=std::getenv("SMARTIES_PAIRED_RESTORE");
   pairedMode=(control && *control) || (restore && *restore);
   if(!pairedMode) return;
+  if(!control || !*control)
+    throw std::runtime_error("paired restore requires SMARTIES_PAIRED_CONTROL for coordinated completion");
   if(!distrib.bIsMaster || distrib.learnersOnWorkers ||
      distrib.nForkedProcesses2spawn!=0 || distrib.nMasters!=1 ||
      MPICommSize(learners_train_comm)!=1 || learners.size()!=1 ||

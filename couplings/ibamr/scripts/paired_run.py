@@ -130,6 +130,12 @@ def text(path):
     except FileNotFoundError: return ""
 
 
+def budget_reached(meta,cfg):
+    # Near-wall has one agent per environment. Native sample accounting is
+    # cumulative local transitions minus the original warmup allocation.
+    return meta.get("algorithmStage",-1)>=0 and meta.get("nLocTimeStepsTrain",-1)>=cfg["steps"]
+
+
 class PairedRun:
     def __init__(self, run, cfg, restore=None):
         self.run, self.cfg, self.restore = Path(run), cfg, restore
@@ -159,6 +165,7 @@ class PairedRun:
         if restore:
             self.env.update(SMARTIES_PAIRED_RESTORE=str(restore/"learner"), EEL_PAIRED_RESTORE=str(restore))
         self.stop_requested = False
+        self.budget_completed = False
         self.save_stop_failed = False
         self.stage = None
         self.last_checkpoint = time.monotonic()
@@ -263,8 +270,13 @@ class PairedRun:
         if error: raise RuntimeError(f"learner checkpoint failed: {error}")
         if text(self.control/"learner.ready")!=str(stage/"learner"): return False
         required,states=snapshot_members(stage,self.cfg["environments"],self.cfg["ranks"])
+        learner_meta=json.loads((stage/"learner/learner.meta").read_text())
+        # The final feedback can cross the budget immediately before the
+        # learner notices our request, before it publishes its budget marker.
+        self.budget_completed |= budget_reached(learner_meta,self.cfg)
+        self.stop_requested |= self.budget_completed
         meta=dict(configuration=self.cfg, environments=states,
-                  learner=json.loads((stage/"learner/learner.meta").read_text()),
+                  learner=learner_meta,
                   session=self.session.name)
         try:
             snapshot=self.store.publish(stage, meta, required)
@@ -308,12 +320,22 @@ class PairedRun:
             stopping=False
             while self.learner.poll() is None:
                 self.stop_requested |= (self.run/"stop.request").exists()
-                self.launch_requests(allow_new=not stopping)
-                if not resumed: resumed=self.release_restore()
+                self.budget_completed |= (self.control/"learner.budget_reached").exists()
+                self.stop_requested |= self.budget_completed
+                if not resumed:
+                    # Restored active CFD members must be launched to reach
+                    # resume.ready before any new pause can be requested.
+                    self.launch_requests()
+                    resumed=self.release_restore()
                 if resumed and not stopping:
                     if not self.stage and (self.stop_requested or
                         time.monotonic()-self.last_checkpoint>=60*self.cfg["checkpoint_minutes"]):
                         self.begin_checkpoint()
+                if resumed:
+                    # begin_checkpoint first: queued next episodes are parked
+                    # rather than launched once stop/budget/periodic save is due.
+                    self.launch_requests(allow_new=not stopping)
+                if resumed and not stopping:
                     stopping=self.advance_checkpoint()
                 if self.stage and time.monotonic()-self.last_notice>60:
                     ready=[slot.name for slot in self.slots if text(slot/"proxy.ready")==str(self.stage/slot.name)]
@@ -326,7 +348,7 @@ class PairedRun:
                 if job.poll() is None: raise RuntimeError("learner exited with live CFD job")
                 if job.poll()!=0: raise RuntimeError("CFD job exited abnormally")
             result=learner_result or int(self.save_stop_failed)
-            if result==0 and not stopping:
+            if result==0 and self.budget_completed:
                 publish(self.run/"completed", self.session.name)
                 self.log("training budget completed normally")
             elif result==0:
@@ -386,6 +408,10 @@ def main(argv=None):
             if descriptor["metadata"]["configuration"]!=cfg:
                 raise ValueError("run configuration changed since checkpoint; restore refused")
             snapshot_members(restore,cfg["environments"],cfg["ranks"])
+            if budget_reached(descriptor["metadata"].get("learner",{}),cfg):
+                publish(run/"completed",restore.name)
+                print("恢复点已达到原累计训练预算；没有启动新的训练。")
+                return 0
         settings=(restore/"config/settings.json") if restore else run/"settings.json"
         validate_training(json.loads(settings.read_text()),cfg["threads"])
         (run/"stop.request").unlink(missing_ok=True)

@@ -103,6 +103,77 @@ class PairedRunTests(unittest.TestCase):
         self.assertTrue((manager.slots[0]/"checkpoint.release").read_text().endswith("CONTINUE\n"))
         self.assertFalse(list((self.root/"checkpoints").glob("snapshot-*")))
 
+    def manager_fixture(self):
+        cfg=self.config(steps=8)
+        for name in ("input2d","eel2d.vertex","task.conf"):
+            (self.root/name).write_text("original input")
+        (self.root/"settings.json").write_text('{"batchSize":8,"minTotObsNum":8}')
+        return PairedRun(self.root,cfg)
+
+    def parked_pending_participants(self,manager,steps):
+        stage=manager.stage
+        self.assertIsNotNone(stage,"stop/budget must start checkpoint before polling participants")
+        for slot in manager.slots:
+            (stage/slot.name/"proxy.state").write_text("1 1 0 N 0")
+            (stage/slot.name/"agent.state").write_bytes(b"agent")
+            (slot/"proxy.ready").write_text(str(stage/slot.name))
+        (stage/"learner/learner.native").write_bytes(b"native")
+        (stage/"learner/learner.meta").write_text(json.dumps(dict(
+            algorithmStage=0,nGradSteps=1,nLocTimeSteps=steps+8,
+            nLocTimeStepsTrain=steps,nTrainSteps=manager.cfg["steps"])))
+        (manager.control/"learner.ready").write_text(str(stage/"learner"))
+
+    def execute_queued_checkpoint(self,budget):
+        manager=self.manager_fixture()
+        class LearnerPeer:
+            process=None
+            def start(self,*args): pass
+            def poll(self): return 0 if (manager.control/"learner.stop").exists() else None
+        manager.learner=LearnerPeer()
+        for slot in manager.slots: (slot/"request").write_text("1")
+        trigger=manager.control/"learner.budget_reached" if budget else self.root/"stop.request"
+        trigger.write_text("reached" if budget else "stop")
+        def participants(_):
+            if manager.stage: self.parked_pending_participants(manager,8 if budget else 6)
+        # Only the learner boundary is substituted. Real launch_requests,
+        # checkpoint coordination/publication and completion markers execute.
+        with patch("paired_run.subprocess.Popen",side_effect=AssertionError("new CFD launched after stop/budget")), \
+             patch("paired_run.time.sleep",side_effect=participants):
+            self.assertEqual(manager.execute(),0)
+        for slot in manager.slots:
+            self.assertEqual(list(slot.glob("episode_*")),[])
+            self.assertTrue((slot/"checkpoint.release").read_text().endswith("STOP\n"))
+        self.assertEqual((self.root/"completed").exists(),budget)
+        self.assertEqual(len(list((self.root/"checkpoints").glob("snapshot-*"))),1)
+
+    def test_stop_prevents_queued_episode_launch_same_iteration(self):
+        self.execute_queued_checkpoint(False)
+
+    def test_budget_marker_checkpoints_without_new_episode_and_marks_completed(self):
+        self.execute_queued_checkpoint(True)
+
+    def test_checkpoint_metadata_detects_budget_reached_during_acquisition(self):
+        manager=self.manager_fixture()
+        manager.begin_checkpoint()
+        self.parked_pending_participants(manager,8)
+        self.assertTrue(manager.advance_checkpoint())
+        self.assertTrue((manager.control/"learner.stop").exists())
+
+    @unittest.skipUnless(os.name=="posix", "runtime lock is POSIX")
+    def test_resume_at_saved_cumulative_budget_starts_no_jobs(self):
+        manager=self.manager_fixture()
+        manager.begin_checkpoint()
+        self.parked_pending_participants(manager,8)
+        required,states=snapshot_members(manager.stage,2,16)
+        meta=json.loads((manager.stage/"learner/learner.meta").read_text())
+        manager.store.publish(manager.stage,dict(configuration=manager.cfg,learner=meta),required)
+        (self.root/"run-config.json").write_text(json.dumps(manager.cfg))
+        sessions=list((self.root/"sessions").iterdir())
+        with patch("paired_run.subprocess.Popen",side_effect=AssertionError("completed snapshot launched MPI")):
+            self.assertEqual(main(["resume","--run",str(self.root)]),0)
+        self.assertTrue((self.root/"completed").exists())
+        self.assertEqual(list((self.root/"sessions").iterdir()),sessions)
+
     def test_dead_supervisor_does_not_allow_duplicate_surviving_mpi_jobs(self):
         directory=self.root/"sessions/session-000001/env_1/episode_1"
         directory.mkdir(parents=True)

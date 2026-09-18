@@ -58,25 +58,47 @@ static void protocol(int argc, char** argv) {
         c->sendInitState({4,5});
       }
     }
-    saveAgent(*c,dest+"/proxy"+std::to_string(rank),0);
+    const auto checkpoint=[&](const std::string& destination,bool stopAfter) {
+    saveAgent(*c,destination+"/proxy"+std::to_string(rank),0);
     int parked=1;
     if(rank==2) MPI_Send(&parked,1,MPI_INT,1,4321,MPI_COMM_WORLD);
     if(rank==1) {
       MPI_Recv(&parked,1,MPI_INT,2,4321,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-      { std::ofstream req(control+"/learner.request"); req << dest << '\n'; }
+      { std::ofstream req(control+"/learner.request"); req << destination << '\n'; }
       bool ready=false;
       for(int i=0;i<10000;++i) {
         std::ifstream r(control+"/learner.ready"); std::string value;
-        if(r && std::getline(r,value) && value==dest) { ready=true; break; }
+        if(r && std::getline(r,value) && value==destination) { ready=true; break; }
         std::ifstream e(control+"/learner.error");
         if(e) { std::string message; std::getline(e,message); throw std::runtime_error(message); }
         usleep(1000);
       }
       check(ready,"learner did not checkpoint while proxies parked");
-      { std::ofstream stop(control+"/learner.stop"); stop << "stop\n"; }
+      if(stopAfter) { std::ofstream stop(control+"/learner.stop"); stop << "stop\n"; }
       check(unlink((control+"/learner.request").c_str())==0,"cannot release checkpoint");
       MPI_Send(&parked,1,MPI_INT,2,4322,MPI_COMM_WORLD);
     } else MPI_Recv(&parked,1,MPI_INT,1,4322,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+    };
+    if(std::getenv("NATIVE_TEST_BUDGET")) {
+      // With minObs8 and cumulative budget8, completed episodes give 14 seen
+      // transitions (6 after warmup). Release a periodic snapshot and accept
+      // one CONT per proxy; proxy1 parks before proxy2 crosses the budget.
+      checkpoint(dest,false);
+      int parked=1;
+      if(rank==1) {
+        c->sendState({6,7},0.75);
+        std::cout << "proxy1 parked after periodic CONT\n" << std::flush;
+        MPI_Send(&parked,1,MPI_INT,2,4320,MPI_COMM_WORLD);
+      } else {
+        MPI_Recv(&parked,1,MPI_INT,1,4320,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+        c->sendState({6,7},0.75);
+        std::cout << "proxy2 crossed cumulative budget while proxy1 parked\n" << std::flush;
+        usleep(200000); // expose legacy shutdown before supervisor all-ready
+      }
+      checkpoint(dest+"/final",true);
+      check(access((control+"/learner.budget_reached").c_str(),F_OK)==0,
+            "paired budget completion marker missing");
+    } else checkpoint(dest,true);
   });
 }
 int main(int argc, char** argv) {
