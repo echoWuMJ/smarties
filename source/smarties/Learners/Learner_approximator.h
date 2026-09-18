@@ -46,6 +46,7 @@ class Learner_approximator: public Learner
   virtual void getHeaders(std::ostringstream& buff) const override;
   virtual void save() override;
   virtual void restart() override;
+  void checkpoint(TrainingCheckpoint& ar) override;
 };
 
 }

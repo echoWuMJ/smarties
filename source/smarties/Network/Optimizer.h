@@ -12,6 +12,7 @@
 #include "Layers/Parameters.h"
 #include "../Settings/ExecutionInfo.h"
 #include "../Settings/HyperParameters.h"
+#include "../Utils/TrainingCheckpoint.h"
 
 namespace smarties
 {
@@ -61,6 +62,15 @@ public:
   virtual int restart(const NetLoadF_t& F,
                       const std::string fname) = 0;
   virtual void setStep(const Uint step) { nStep = step; }
+  virtual void checkpoint(TrainingCheckpoint& ar) {
+    ar.require(false,"paired checkpoint requires native Adam optimizer");
+  }
+  void saveTrainingState(const std::string& path) {
+    TrainingCheckpoint ar(path,false,"optimizer"); checkpoint(ar); ar.finish();
+  }
+  void restoreTrainingState(const std::string& path) {
+    TrainingCheckpoint ar(path,true,"optimizer"); checkpoint(ar); ar.finish();
+  }
 
   virtual void prepare_update(const Rvec&L) = 0;
   virtual void apply_update() = 0;
@@ -108,6 +118,7 @@ public:
                 const Real B1=.9, const Real B2=.999);
 
   void setStep(const Uint step) override;
+  void checkpoint(TrainingCheckpoint& ar) override;
   void prepare_update(const Rvec& L) override;
   bool ready2UpdateWeights() override
   {

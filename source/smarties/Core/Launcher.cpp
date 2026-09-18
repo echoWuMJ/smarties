@@ -116,6 +116,12 @@ void Launcher::launch(const environment_callback_t & callback,
     for(size_t i = 0; i < args.size()-1; ++i) delete[] args[i];
     chdir(currDirectory);  // go to original directory
     if(bTrainIsOver) break;
+    // A paired supervisor releases parked proxies by returning from their
+    // callback, without manufacturing a state just to receive a KILL action.
+    const char* pairedControl=std::getenv("SMARTIES_PAIRED_CONTROL");
+    if(pairedControl && *pairedControl &&
+       access((std::string(pairedControl)+"/learner.stop").c_str(),F_OK)==0)
+      break;
   }
 }
 

@@ -13,6 +13,9 @@
 #include "../Utils/SstreamUtilities.h"
 
 #include <fstream>
+#include <sys/stat.h>
+#include <cerrno>
+#include <cstdio>
 
 namespace smarties
 {
@@ -69,7 +72,9 @@ void Worker::runTraining()
   ////// FIRST SETUP SIMPLE FUNCTIONS TO DETECT START AND END OF TRAINING //////
   //////////////////////////////////////////////////////////////////////////////
   long minNdataB4Train = learners[0]->nObsB4StartTraining;
-  int firstLearnerStart = 0, isTrainingStarted = 0, percentageReady = -5;
+  int firstLearnerStart = 0, isTrainingStarted =
+      pairedMode && learners[0]->trainingAlgorithmStage()>=0 ? 1 : 0,
+      percentageReady = -5;
   for(Uint i=1; i<learners.size(); ++i)
     if(learners[i]->nObsB4StartTraining < minNdataB4Train) {
       minNdataB4Train = learners[i]->nObsB4StartTraining;
@@ -150,6 +155,7 @@ void Worker::runTraining()
   /////////////////////////////// TRAINING LOOP ////////////////////////////////
   //////////////////////////////////////////////////////////////////////////////
   while(1) {
+    if(pairedMode && servicePairedCheckpoint()) break;
     algoTasks.run();
     if ( isOver() ) break;
   }
@@ -158,6 +164,110 @@ void Worker::runTraining()
   bDataCoordRunning = 0;
   dataCoordProcess.join();
   for(auto& learner : learners) learner->finalizeTraining();
+}
+
+void Worker::initializePairedTraining()
+{
+  const char* control=std::getenv("SMARTIES_PAIRED_CONTROL");
+  const char* restore=std::getenv("SMARTIES_PAIRED_RESTORE");
+  pairedMode=(control && *control) || (restore && *restore);
+  if(!pairedMode) return;
+  if(!distrib.bIsMaster || distrib.learnersOnWorkers ||
+     distrib.nForkedProcesses2spawn!=0 || distrib.nMasters!=1 ||
+     MPICommSize(learners_train_comm)!=1 || learners.size()!=1 ||
+     workerless_masters_comm!=MPI_COMM_NULL ||
+     MPICommSize(master_workers_comm)<2 || distrib.workerProcessesPerEnv!=1)
+    throw std::runtime_error("paired restart requires one MPI master and direct single-rank proxies, no worker learners");
+  learners[0]->validateTrainingCheckpoint();
+  if(control && *control) {
+    pairedControl=control;
+    struct stat st;
+    if(pairedControl.front()!='/' || stat(control,&st)!=0 || !S_ISDIR(st.st_mode))
+      throw std::runtime_error("SMARTIES_PAIRED_CONTROL must be an existing absolute directory");
+  }
+  // setupTasks has already initialized its algorithm stage, and no call handler
+  // exists yet. Restoring earlier would reset the loaded stage to warmup.
+  if(restore && *restore) {
+    checkpointTraining(restore,true);
+    if(!pairedControl.empty()) {
+      const std::string path=pairedControl+"/learner.restored", tmp=path+".tmp";
+      std::ofstream out(tmp); out << restore << '\n'; out.flush();
+      if(!out) throw std::runtime_error("failed to write learner.restored");
+      out.close();
+      if(!out || std::rename(tmp.c_str(),path.c_str())!=0)
+        throw std::runtime_error("failed to publish learner.restored");
+    }
+  }
+}
+
+void Worker::checkpointTraining(const std::string& directory, bool restore)
+{
+  struct stat st;
+  if(directory.empty() || directory.front()!='/' ||
+     stat(directory.c_str(),&st)!=0 || !S_ISDIR(st.st_mode))
+    throw std::runtime_error("checkpoint destination must be an existing absolute directory");
+  TrainingCheckpoint ar(directory+"/learner.native",restore,"learner-worker");
+  ar.expect(distrib.nThreads); ar.expect(distrib.nOwnedEnvironments);
+  ar.expect(ENV.nAgentsPerEnvironment); ar.expect(static_cast<Uint>(agents.size()));
+  learners[0]->checkpoint(ar);
+  for(auto& agent:agents) agent->checkpoint(ar);
+  ar.finish();
+  if(!restore) {
+    std::ofstream meta(directory+"/learner.meta");
+    meta << "{\"nGradSteps\":" << learners[0]->nGradSteps()
+         << ",\"nLocTimeSteps\":" << learners[0]->nLocTimeSteps()
+         << ",\"nLocTimeStepsTrain\":" << learners[0]->nLocTimeStepsTrain()
+         << ",\"algorithmStage\":" << learners[0]->trainingAlgorithmStage()
+         << ",\"nTrainSteps\":" << distrib.nTrainSteps << "}\n";
+    meta.flush();
+    if(!meta) throw std::runtime_error("failed to write learner.meta");
+    meta.close();
+    if(!meta) throw std::runtime_error("failed to close learner.meta");
+  }
+}
+
+bool Worker::servicePairedCheckpoint()
+{
+  if(pairedControl.empty()) return false;
+  const std::string request=pairedControl+"/learner.request";
+  if(access(request.c_str(),F_OK)!=0) {
+    if(errno==ENOENT) return false;
+    throw std::runtime_error("cannot inspect paired learner request");
+  }
+  for(auto& learner:learners) learner->requestTrainingCheckpoint(true);
+  // A reduction launched by stepMain must complete, but the requested flag
+  // prohibits stepInit/stepMain from starting any new optimizer work.
+  while(!learners[0]->atTrainingCheckpointBoundary()) algoTasks.run();
+  const auto marker=[&](const std::string& name,const std::string& value) {
+    const std::string path=pairedControl+"/"+name, temporary=path+".tmp";
+    std::ofstream out(temporary,std::ios::trunc); out << value << '\n'; out.flush();
+    if(!out) throw std::runtime_error("failed to write paired marker "+temporary);
+    out.close();
+    if(!out || std::rename(temporary.c_str(),path.c_str())!=0)
+      throw std::runtime_error("failed to publish paired marker "+path);
+  };
+  std::remove((pairedControl+"/learner.ready").c_str());
+  std::remove((pairedControl+"/learner.error").c_str());
+  try {
+    std::ifstream in(request); std::string destination, extra;
+    if(!std::getline(in,destination) || destination.empty() ||
+       (std::getline(in,extra) && !extra.empty()))
+      throw std::runtime_error("invalid learner.request destination");
+    // The supervisor guarantees all sendState calls have returned. This lock
+    // also establishes a C++ happens-before edge from every action handler.
+    std::lock_guard<std::mutex> lock(pairedStateMutex);
+    checkpointTraining(destination,false);
+    marker("learner.ready",destination);
+  } catch(const std::exception& e) { marker("learner.error",e.what()); }
+  bool stop=false;
+  while(access(request.c_str(),F_OK)==0) {
+    stop=stop || access((pairedControl+"/learner.stop").c_str(),F_OK)==0;
+    usleep(1000);
+  }
+  stop=stop || access((pairedControl+"/learner.stop").c_str(),F_OK)==0;
+  if(stop) { pairedStop=true; return true; }
+  for(auto& learner:learners) learner->requestTrainingCheckpoint(false);
+  return false;
 }
 
 void Worker::answerStateAction(Agent& agent) const

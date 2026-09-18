@@ -14,6 +14,24 @@
 namespace smarties
 {
 
+void Approximator::checkpoint(TrainingCheckpoint& ar)
+{
+  ar.require(!settings.bRecurrent && !replay->MDP.isPartiallyObservable &&
+             reducedGradients==0 && nAddedGradients==0,"network update is not drained");
+  ar.expect(name); ar.expect(nThreads); ar.expect(nAgents);
+  ar.expect(settings.nnLayerSizes); ar.expect(settings.encoderLayerSizes);
+  ar.expect(settings.nnFunc); ar.expect(settings.nnOutputFunc);
+  opt->checkpoint(ar);
+  ar(losses);
+  // FFNN workspaces are scratch: load() resets their time series before the
+  // next forward pass. No recurrent state is admitted by paired validation.
+  if(gradStats) {
+    auto& s=*gradStats;
+    ar(s.cnt,s.avg,s.std,s.instMean,s.instStdv,s.nStep);
+    for(Uint i=0;i<s.nThreads;++i) ar(s.cntVec[i],s.avgVec[i],s.stdVec[i]);
+  }
+}
+
 Approximator::Approximator(std::string name_,
                            const HyperParameters&S,
                            const ExecutionInfo&D,

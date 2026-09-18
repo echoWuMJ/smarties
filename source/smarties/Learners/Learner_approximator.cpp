@@ -117,6 +117,13 @@ void Learner_approximator::spawnTrainTasks()
   profiler->stop();
 }
 
+void Learner_approximator::checkpoint(TrainingCheckpoint& ar)
+{
+  Learner::checkpoint(ar);
+  ar.expect(static_cast<Uint>(networks.size()));
+  for(auto* net:networks) net->checkpoint(ar);
+}
+
 void Learner_approximator::prepareCMALoss()
 {
 

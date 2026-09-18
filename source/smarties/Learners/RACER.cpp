@@ -68,6 +68,7 @@ void RACER<Advantage_t, Policy_t, Action_t>::setupTasks(TaskQueue& tasks)
 
   auto stepInit = [&]()
   {
+    if(checkpointRequested) return;
     // conditions to start the initialization task:
     if ( algoSubStepID >= 0 ) return; // we done with init
     if ( data->nStoredSteps() < nObsB4StartTraining ) return; // not enough data to init
@@ -80,6 +81,7 @@ void RACER<Advantage_t, Policy_t, Action_t>::setupTasks(TaskQueue& tasks)
 
   auto stepMain = [&]()
   {
+    if(checkpointRequested) return;
     // conditions to begin the update-compute task
     if ( algoSubStepID not_eq 0 ) return; // some other op is in progress
     if ( blockGradientUpdates() ) return; // waiting for enough data

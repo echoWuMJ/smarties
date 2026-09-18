@@ -51,6 +51,7 @@ template<typename CommType, typename Request_t>
 void Master<CommType, Request_t>::run()
 {
   synchronizeEnvironments();
+  initializePairedTraining();
   spawnCallsHandlers(); // fills worker_replies threads
   runTraining();
 }
@@ -125,6 +126,12 @@ void Master<CommType,Request_t>::waitForStateActionCallers(const std::vector<Uin
 
   for(size_t i=0; ; ++i) // infinite loop : communicate until break command
   {
+    if(pairedStop.load()) {
+      // All proxies are parked outside sendState. Normal shutdown still uses
+      // the legacy KILL exchange; only an acknowledged paired stop cancels.
+      for(auto& req:reqs) interface()->CancelRecv(req);
+      return;
+    }
     const Uint j = i % nClients, callID = givenWorkers[j], callRank = callID+1;
     // communication handle is rank_of_worker := workerID + 1 (master is 0)
     const int completed = interface()->TestComm(reqs[j]);
@@ -138,6 +145,8 @@ void Master<CommType,Request_t>::waitForStateActionCallers(const std::vector<Uin
     }
 
     if(completed) {
+      std::unique_lock<std::mutex> pairedLock(pairedStateMutex,std::defer_lock);
+      if(pairedMode) pairedLock.lock();
       answerStateAction(callID);
       if(bExit.load()>0) { // exit in case this process reached max num steps
         sendKillMsgs(j);

@@ -56,6 +56,9 @@ public:
   void WaitComm(SOCKET_REQ& request) const {
     SOCKET_Wait(request);
   }
+  void CancelRecv(SOCKET_REQ&) const {
+    throw std::runtime_error("paired stop does not support sockets");
+  }
 
   MasterSockets( ExecutionInfo& );
   ~MasterSockets() override;
@@ -85,6 +88,15 @@ public:
   void WaitComm(MPI_Request& request) const {
     //MPI_Status mpistatus;
     MPI(Wait, &request, MPI_STATUS_IGNORE);
+  }
+  void CancelRecv(MPI_Request& request) const {
+    if(request==MPI_REQUEST_NULL) return;
+    MPI(Cancel, &request);
+    MPI_Status status;
+    MPI(Wait, &request, &status);
+    int cancelled=0;
+    MPI(Test_cancelled, &status, &cancelled);
+    if(!cancelled) throw std::runtime_error("paired stop encountered unparked proxy feedback");
   }
 
   MasterMPI( ExecutionInfo& );

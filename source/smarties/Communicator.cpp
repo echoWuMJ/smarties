@@ -252,6 +252,27 @@ void Communicator::finalizeProblemDescription()
   synchronizeEnvironments();
 }
 
+void Communicator::saveAgentState(const std::string& path) const
+{
+  TrainingCheckpoint ar(path,false,"communicator");
+  ar.require(ENV.bFinalized,"finalizeProblemDescription must precede checkpoint");
+  ar.expect(static_cast<Uint>(agents.size()));
+  for(auto& a:agents) a->checkpoint(ar);
+  auto& self=*const_cast<Communicator*>(this);
+  ar.random(self.gen);
+  ar(self.bTrain,self.bTrainIsOver,self.nRequestedEnvTimeSteps,self.globalTstepCounter);
+  ar.finish();
+}
+void Communicator::restoreAgentState(const std::string& path)
+{
+  TrainingCheckpoint ar(path,true,"communicator");
+  ar.require(ENV.bFinalized,"finalizeProblemDescription must precede restore");
+  ar.expect(static_cast<Uint>(agents.size()));
+  for(auto& a:agents) a->checkpoint(ar);
+  ar.random(gen); ar(bTrain,bTrainIsOver,nRequestedEnvTimeSteps,globalTstepCounter);
+  ar.finish();
+}
+
 void Communicator::_sendState(const int agentID, const episodeStatus status,
     const std::vector<double>& state, const double reward)
 {

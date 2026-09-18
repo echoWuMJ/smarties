@@ -20,6 +20,45 @@
 namespace smarties
 {
 
+void MemoryBuffer::checkpoint(TrainingCheckpoint& ar)
+{
+  ar.require(settings.dataSamplingAlgo=="uniform" && !settings.bSampleEpisodes,
+             "only uniform transition sampling is supported");
+  ar.expect(MDP.dimState); ar.expect(MDP.dimStateObserved);
+  ar.expect(MDP.dimAction); ar.expect(MDP.policyVecDim);
+  ar(beta,alpha,CmaxRet,CinvRet,learnID,lastSampledEps,minPriorityImpW,maxPriorityImpW);
+  ar(stats.nFarPolicySteps,stats.avgKLdivergence,stats.countReturnsEstimateUpdates,
+     stats.sumReturnsEstimateErrors,stats.avgSquaredErr,stats.maxAbsError,
+     stats.avgReturn,stats.stdevQ,stats.avgQ,stats.maxQ,stats.minQ,stats.nPrunedEps);
+  ar(counters.nGradSteps,counters.nGatheredB4Startup,counters.nEpisodes,
+     counters.nTransitions,counters.nSeenEpisodes,counters.nSeenTransitions,
+     counters.nSeenEpisodes_loc,counters.nSeenTransitions_loc);
+  ar(MDP.stateMean,MDP.stateStdDev,MDP.stateScale,
+     MDP.rewardsMean,MDP.rewardsStdDev,MDP.rewardsScale);
+  ar.require(StateRewRdx.buffRequest==MPI_REQUEST_NULL &&
+             globalCounterRdx.buffRequest==MPI_REQUEST_NULL,"pending replay reduction");
+  ar(StateRewRdx.return_ret,StateRewRdx.reduce_ret,StateRewRdx.partialret,
+     globalCounterRdx.return_ret,globalCounterRdx.reduce_ret,globalCounterRdx.partialret);
+  const auto transfer=[&](std::vector<std::unique_ptr<Episode>>& eps) {
+    std::uint64_t size=eps.size(); ar(size);
+    ar.require(size<=10000000,"invalid episode count");
+    if(ar.reading) { eps.clear(); for(std::uint64_t i=0;i<size;++i)
+      eps.emplace_back(std::make_unique<Episode>(MDP)); }
+    for(auto& ep:eps) ep->checkpoint(ar);
+  };
+  transfer(episodes); transfer(inProgress);
+  ar.require(inProgress.size()==distrib.nAgents &&
+             episodes.size()==static_cast<std::size_t>(nStoredEps()),"replay count mismatch");
+  ar.expect(static_cast<Uint>(distrib.generators.size()));
+  for(auto& gen:distrib.generators) ar.random(gen);
+}
+void MemoryBuffer::saveTrainingState(const std::string& path) {
+  TrainingCheckpoint ar(path,false,"replay"); checkpoint(ar); ar.finish();
+}
+void MemoryBuffer::restoreTrainingState(const std::string& path) {
+  TrainingCheckpoint ar(path,true,"replay"); checkpoint(ar); ar.finish();
+}
+
 MemoryBuffer::MemoryBuffer(MDPdescriptor& M, HyperParameters& S, ExecutionInfo& D) :
   MDP(M), settings(S), distrib(D), sharing( new DataCoordinator(this, params) ),
   StateRewRdx(distrib, LDvec(MDP.dimStateObserved * 2 + 3, 0) ),

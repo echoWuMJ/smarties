@@ -119,6 +119,26 @@ void AdamOptimizer::prepare_update(const Rvec& esLosses)
   nStep++;
 }
 
+void AdamOptimizer::checkpoint(TrainingCheckpoint& ar)
+{
+  ar.require(learn_size==1 && populationSize==1 && paramRequest==MPI_REQUEST_NULL,
+             "optimizer is not at a supported checkpoint boundary");
+  ar.expect(weights->nWeights); ar.expect(weights->nBiases);
+  ar.expect(beta_1); ar.expect(beta_2); ar.expect(batchSize);
+  ar.expect(eta_init); ar.expect(epsAnneal); ar.expect(tgtUpdateAlpha);
+  ar(nStep,cntUpdateDelay,beta_t_1,beta_t_2,eta,lambda,bAnnealLearnRate);
+  const auto params=[&](const std::shared_ptr<Parameters>& p) {
+    ar.expect(p->nParams); ar(p->written);
+    ar.bytes(p->params,sizeof(nnReal)*p->nParams);
+  };
+  params(weights); params(target_weights); params(_1stMom); params(_2ndMom);
+  // Reduced/thread gradients have been consumed at a complete update boundary.
+  // Serialize them as well, including written flags, to enforce the invariant
+  // without depending on optimizer allocation defaults.
+  params(gradSum); ar.expect(static_cast<Uint>(gradients.size()));
+  for(const auto& g:gradients) params(g);
+}
+
 void AdamOptimizer::apply_update()
 {
   if(nStep == 0) die("nStep == 0");

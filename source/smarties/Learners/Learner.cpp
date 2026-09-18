@@ -27,6 +27,29 @@ Learner::~Learner()
 {
 }
 
+void Learner::validateTrainingCheckpoint() const
+{
+  if(settings.learner!="VRACER" || settings.bRecurrent || settings.nnType!="FFNN" ||
+     settings.dataSamplingAlgo!="uniform" || settings.bSampleEpisodes ||
+     settings.ESpopSize!=1 || MDP.bAgentsShareNoise || MDP.isPartiallyObservable ||
+     MDP.bDiscreteActions() || !MDP.conv2dDescriptors.empty() || learn_size!=1 ||
+     distrib.learnersOnWorkers || !bTrain)
+    throw std::runtime_error("paired restart supports single-learner native FFNN VRACER, uniform replay, unshared noise only");
+}
+void Learner::checkpoint(TrainingCheckpoint& ar)
+{
+  validateTrainingCheckpoint();
+  ar.expect(learner_name); ar.expect(settings.learner);
+  ar.expect(nThreads); ar.expect(nAgents); ar.expect(gamma);
+  ar.expect(obsPerStep_loc); ar.expect(nObsB4StartTraining);
+  ar.expect(settings.returnsEstimator); ar.expect(settings.ERoldSeqFilter);
+  ar.expect(settings.maxTotObsNum); ar.expect(settings.clipImpWeight);
+  ar.expect(settings.penalTol); ar.expect(settings.epsAnneal);
+  ar(algoSubStepID,freqPrint);
+  ar.require(atTrainingCheckpointBoundary(),"incomplete algorithm update");
+  data->checkpoint(ar);
+}
+
 void Learner::select(Agent& agent)
 {
   data->storeState(agent);

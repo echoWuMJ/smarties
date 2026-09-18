@@ -15,6 +15,7 @@
 #include <cassert>
 #include <mutex>
 #include <cmath>
+#include "../Utils/TrainingCheckpoint.h"
 
 namespace smarties
 {
@@ -95,6 +96,19 @@ struct Episode
     KullbLeibDiv.clear(); priorityImpW.clear();
     avgKLDivergence  = 0; fracFarPolSteps = 0; avgSquaredErr = 0; maxAbsError = 0;
     sumSquaredQ = 0; sumQ = 0; maxQ = -1e9; minQ = 1e9;
+  }
+
+  void checkpoint(TrainingCheckpoint& ar) {
+    ar(bReachedTermState,ID,just_sampled,agentID,totR,states,latent_states,
+       actions,policies,rewards,stateValue,actionAdvantage,returnEstimator,
+       deltaValue,offPolicImpW,KullbLeibDiv,priorityImpW,avgKLDivergence,
+       fracFarPolSteps,avgSquaredErr,maxAbsError,sumSquaredQ,sumQ,maxQ,minQ);
+    ar.require(states.size()==rewards.size() && states.size()==actions.size()
+      && states.size()==policies.size() && states.size()==latent_states.size(),
+      "invalid episode lengths");
+    for(const auto& s:states) ar.require(s.size()==MDP.dimObs(),"invalid episode state");
+    for(const auto& a:actions) ar.require(a.size()==MDP.dimAct(),"invalid episode action");
+    for(const auto& p:policies) ar.require(p.size()==MDP.dimPol(),"invalid episode policy");
   }
 
   void clearNonTrackedAgent()

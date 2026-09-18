@@ -15,6 +15,7 @@
 
 #include <atomic>
 #include <random>
+#include "../Utils/TrainingCheckpoint.h"
 #define OUTBUFFSIZE 65536
 
 namespace smarties
@@ -56,7 +57,7 @@ struct Agent
   std::vector<double> state = std::vector<double>(MDP.dimState, 0);  // current state
   std::vector<double> action = std::vector<double>(MDP.dimAction, 0);
   Rvec policyVector;
-  double reward; // current reward
+  double reward = 0; // current reward
   double cumulativeRewards = 0;
 
   std::mt19937 generator;
@@ -65,6 +66,34 @@ struct Agent
 
   Agent(Uint _ID, Uint workID, Uint _localID, MDPdescriptor& _MDP) :
     ID(_ID), workerID(workID), localID(_localID), MDP(_MDP) {}
+
+  void checkpoint(TrainingCheckpoint& ar) {
+    ar.require(!MDP.bAgentsShareNoise,"shared action noise unsupported");
+    ar.expect(ID); ar.expect(workerID); ar.expect(localID);
+    ar.expect(MDP.dimState); ar.expect(MDP.dimAction);
+    ar.expect(MDP.bStateVarObserved); ar.expect(MDP.nAppendedObs);
+    ar.expect(MDP.lowerActionValue); ar.expect(MDP.upperActionValue);
+    ar.expect(MDP.bActionSpaceBounded); ar.expect(MDP.discreteActionValues);
+    // Proxy MDP policyVecDim is zero; the learner owns its policy dimension.
+    ar(agentStatus,timeStepInEpisode,learnStatus,learnerTimeStepID,
+       learnerGradStepID,learnerAvgCumulativeReward,trackEpisodes,
+       sOld,state,action,policyVector,reward,cumulativeRewards);
+    ar.random(generator); ar.random(distribution); ar.random(safety);
+    ar.require(agentStatus>=INIT && agentStatus<=FAIL &&
+               (learnStatus==WORK || learnStatus==KILL),"invalid Agent status");
+    ar.require(state.size()==MDP.dimState && sOld.size()==MDP.dimState &&
+               action.size()==MDP.dimAction,"invalid Agent dimensions");
+    Uint count=buffCnter.load(); ar(count);
+    ar.require(count<=OUTBUFFSIZE,"invalid observation log buffer");
+    ar.bytes(buf,count*sizeof(float)); if(ar.reading) buffCnter=count;
+  }
+  void saveAgentState(const std::string& path) const {
+    TrainingCheckpoint ar(path,false,"agent");
+    const_cast<Agent*>(this)->checkpoint(ar); ar.finish();
+  }
+  void restoreAgentState(const std::string& path) {
+    TrainingCheckpoint ar(path,true,"agent"); checkpoint(ar); ar.finish();
+  }
 
   void reset()
   {

@@ -119,6 +119,8 @@ public:
   VISIBLE void setIsPartiallyObservable(const int agentID = 0);
 
   VISIBLE void finalizeProblemDescription();
+  VISIBLE void saveAgentState(const std::string& path) const;
+  VISIBLE void restoreAgentState(const std::string& path);
 
   //////////////////////////////////////////////////////////////////////////////
   ////////////////////////////// ADVANCED METHODS //////////////////////////////

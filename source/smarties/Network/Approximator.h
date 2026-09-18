@@ -335,6 +335,7 @@ struct Approximator
   void getMetrics(std::ostringstream& buff) const;
   void save(const std::string base, const bool bBackup);
   void restart(const std::string base);
+  void checkpoint(TrainingCheckpoint& ar);
   void rename(std::string newname) { name = newname; }
 
   Optimizer * getOptimizerPtr() {

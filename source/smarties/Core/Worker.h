@@ -38,6 +38,13 @@ public:
 
 protected:
   ExecutionInfo& distrib;
+  std::string pairedControl;
+  std::mutex pairedStateMutex;
+  std::atomic<bool> pairedStop{false};
+  bool pairedMode = false;
+  void initializePairedTraining();
+  bool servicePairedCheckpoint();
+  void checkpointTraining(const std::string& directory, bool restore);
   TaskQueue dataTasks, algoTasks;
 
   const std::unique_ptr<Launcher> COMM;

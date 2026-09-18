@@ -50,6 +50,7 @@ public:
 
 protected:
   int algoSubStepID = -1;
+  bool checkpointRequested = false;
 
   std::vector<std::mt19937>& generators = distrib.generators;
 
@@ -121,6 +122,11 @@ public:
 
   virtual void save();
   virtual void restart();
+  void requestTrainingCheckpoint(bool requested) { checkpointRequested=requested; }
+  bool atTrainingCheckpointBoundary() const { return algoSubStepID==-1 || algoSubStepID==0; }
+  int trainingAlgorithmStage() const { return algoSubStepID; }
+  virtual void checkpoint(TrainingCheckpoint& ar);
+  void validateTrainingCheckpoint() const;
 
   void finalizeTraining() { onTrainingFinalized(); }
 };

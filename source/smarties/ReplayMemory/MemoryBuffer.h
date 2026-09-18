@@ -85,6 +85,9 @@ struct MemoryBuffer
 
   void restart(const std::string base);
   void save(const std::string base);
+  void checkpoint(TrainingCheckpoint& ar);
+  void saveTrainingState(const std::string& path);
+  void restoreTrainingState(const std::string& path);
 
   void getMetrics(std::ostringstream& buff);
   void getHeaders(std::ostringstream& buff);
