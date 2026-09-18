@@ -1,5 +1,9 @@
 # Smarties-IBAMR 耦合安装与使用说明
 
+近壁外部 episode 模式的成套保存、停止和续算入口见
+[配对恢复说明](PAIRED_RESTART.zh-CN.md)。该模式使用 uv Python 3.12 管理独立 MPI
+作业，网络仍使用原生 C++ CPU；下文早期单作业入口及其 Python 说明不适用于这个管理器。
+
 本文从未编译源码开始，说明如何在 node3 上准备依赖、构建、启动和检查
 Smarties-IBAMR 耦合。现成案例是基于 IBAMR 0.18.0 官方 eel2d 的持续物理时间线
 频率控制；同一套 MPI 所有权和案例分层用于后续迁移到其他 IBAMR 案例。

@@ -1,0 +1,16 @@
+{
+  "source": "/data/home/mjwu/rl_sim/paired-restart-dev-20260918/source",
+  "build": "/data/home/mjwu/rl_sim/paired-restart-dev-20260918/build",
+  "environment_script": "/data/home/mjwu/autoibamr-v0.18.0/configuration/enable.sh",
+  "python": "/data/home/mjwu/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/bin/python3.12",
+  "bin_paths": ["/data/home/mjwu/opt/gcc-9.5.0/bin", "/data/home/mjwu/opt/openmpi-gcc9/bin"],
+  "library_paths": ["/data/home/mjwu/opt/gcc-9.5.0/lib64", "/data/home/mjwu/opt/openmpi-gcc9/lib"],
+  "environments": 2,
+  "ranks": 16,
+  "threads": 8,
+  "steps": 8192,
+  "max_periods": 10,
+  "seed": 20260908,
+  "checkpoint_minutes": 30,
+  "keep_checkpoints": 2
+}
