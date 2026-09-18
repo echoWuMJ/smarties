@@ -57,6 +57,13 @@ Smarties 原生 CPU VRACER。操作说明：[成套保存与续算](../../coupli
   为 1.776×10⁻¹⁵。随后完成完整动作区间的连续/恢复对比：16 rank、32 个比较量
   均通过，最大绝对差异为 6.612×10⁻¹⁴；时间、相位和指令频率精确一致，
   其余量使用绝对容差 10⁻⁸、相对容差 10⁻⁶，没有放宽原容差。
+- 对同一完整动作区间已有的 1251 行 Fx 输出做离线积分，连续/恢复的非终态推力
+  奖励分别约为 0.128371703495603 和 0.128371703495587，差异 1.603×10⁻¹⁴。
+  这是文本输出精度下的核对，不代表二进制逐位一致，也未额外运行 CFD。
+- 保存/预算结束竞态：3-rank、8-thread 定向测试先完成周期保存后继续，令一个 proxy
+  暂停、另一个跨过累计预算。修改前无法继续保存，测试限时退出 124；修改后完成最终
+  保存和统一退出，退出 0。管理器相关 14 项测试通过，包括停止时不启动排队中的新回合。
+  此修复位于完整 CFD 验收之后，采用原生 MPI 协议及管理器定向测试，没有重复物理长程运行。
 
 ## 证据
 
@@ -67,8 +74,10 @@ Smarties 原生 CPU VRACER。操作说明：[成套保存与续算](../../coupli
 - `paired-validation/sessions/session-000002/learner-audit/learner_audit.log`：恢复后的有限值更新。
 - 各 session 下的 `transitions.csv`、`process.log` 和 `exit.status`：环境控制及退出证据。
 - `native-final-matrix.log`：已训练和预热原生状态恢复结果。
+- `native-budget-{red,green}.log`、`manager-budget-green.log`：预算结束竞态与启动顺序修复。
 - `cfd-history-restored/comparison.json`：定位并修复受力历史遗漏的定向对比。
 - `cfd-full-interval/comparison.json`：完整动作区间的连续/恢复数值对比。
+- `cfd-full-interval/logged-reward-comparison.json`：同区间已有 Fx 文本输出积分核对。
 
 以上主要日志与摘要已归档到本地
 `C:/Users/wumj/Project/IBAMR/tmp/paired-restart/paired-validation-evidence.tar.gz`，
