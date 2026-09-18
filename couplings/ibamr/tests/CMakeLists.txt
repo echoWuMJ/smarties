@@ -526,3 +526,8 @@ if(BUILD_IBAMR_COUPLING)
       TIMEOUT 7200)
   endif()
 endif()
+
+add_executable(native_training_restart_test native_training_restart.cpp)
+target_include_directories(native_training_restart_test PRIVATE "${PROJECT_SOURCE_DIR}/source")
+target_link_libraries(native_training_restart_test PRIVATE libsmarties MPI::MPI_CXX)
+add_test(NAME native_training_restart COMMAND native_training_restart_test)
